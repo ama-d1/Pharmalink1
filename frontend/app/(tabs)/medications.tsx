@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  ActivityIndicator, Alert, Modal, ScrollView, StatusBar, StyleSheet, Text,
-  TextInput, TouchableOpacity, View,
+  cancelMedicationReminder,
+  requestNotificationPermission,
+  scheduleMedicationReminder,
+} from '@/services/notificationService';
+import {
+  ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView,
+  StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,11 +20,33 @@ import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
 import {
-  addMedication, DrugSuggestion, getDrugSuggestions,
+  addMedication, deleteMedication, DrugSuggestion, getDrugSuggestions,
   getUserMedications, updateDoseStatus,
 } from '@/services/medicationService';
+import { TimePickerModal } from '@/components/ui/TimePickerModal';
 
 const FREQ_OPTIONS = ['Daily', 'Twice daily', 'Three times daily', 'Weekly', 'As needed'];
+
+// How many reminder times a given frequency implies, and sensible defaults for each.
+const DEFAULT_TIMES_BY_FREQ: Record<string, string[]> = {
+  'Twice daily': ['08:00', '20:00'],
+  'Three times daily': ['08:00', '14:00', '20:00'],
+};
+
+function timesForFrequency(frequency: string, current: string[]): string[] {
+  const defaults = DEFAULT_TIMES_BY_FREQ[frequency] ?? ['08:00'];
+  return defaults.map((fallback, i) => current[i] ?? fallback);
+}
+
+function formatTimeLabel(time: string): string {
+  const [hStr, mStr] = time.split(':');
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  if (isNaN(h) || isNaN(m)) return time;
+  const isPM = h >= 12;
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${isPM ? 'PM' : 'AM'}`;
+}
 
 const statusColors: Record<string, { bg: string; text: string; label: string }> = {
   PENDING: { bg: GlassTheme.colors.amberLight, text: GlassTheme.colors.amber, label: 'Pending' },
@@ -31,10 +59,39 @@ export default function MedicationsScreen() {
   const [medications, setMedications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [timePickerIndex, setTimePickerIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'today' | 'reminders' | 'history'>('today');
   const [form, setForm] = useState({
-    name: '', dosage: '', frequency: 'Daily', reminderTime: '08:00', instructions: '',
+    name: '', dosage: '', frequency: 'Daily', reminderTimes: ['08:00'], instructions: '',
   });
+
+  const resetForm = () => {
+    setForm({ name: '', dosage: '', frequency: 'Daily', reminderTimes: ['08:00'], instructions: '' });
+    setEditingId(null);
+  };
+
+  const openAddModal = () => {
+    resetForm();
+    setModalVisible(true);
+  };
+
+  const openEditModal = (med: any) => {
+    setEditingId(med.id);
+    setForm({
+      name: med.name,
+      dosage: med.dosage,
+      frequency: med.frequency,
+      reminderTimes: [med.reminderTime],
+      instructions: med.instructions ?? '',
+    });
+    setModalVisible(true);
+  };
+
+  const handleFrequencyChange = (f: string) => {
+    setForm((prev) => ({ ...prev, frequency: f, reminderTimes: timesForFrequency(f, prev.reminderTimes) }));
+  };
 
   // Drug name autocomplete
   const [suggestions, setSuggestions] = useState<DrugSuggestion[]>([]);
@@ -74,24 +131,86 @@ export default function MedicationsScreen() {
     }
   }, [user?.userId]);
 
-  useEffect(() => { fetchMedications(); }, [fetchMedications]);
+  useEffect(() => {
+    fetchMedications();
+    // Fire-and-forget — must not be allowed to reject unhandled, and must
+    // never be able to affect the medications loading state above.
+    requestNotificationPermission().catch(() => {});
+  }, [fetchMedications]);
 
-  const handleAdd = async () => {
+  // Cancels the local notification tied to a medication row and deletes the
+  // row itself. The backend has no "update" endpoint — editing a medication
+  // works by removing the old row(s) and creating fresh one(s), so this is
+  // shared between delete and edit.
+  const removeMedicationEntry = async (medicationId: string) => {
+    const notificationId = await AsyncStorage.getItem(`reminder:${medicationId}`);
+    if (notificationId) {
+      await cancelMedicationReminder(notificationId);
+      await AsyncStorage.removeItem(`reminder:${medicationId}`);
+    }
+    await deleteMedication(medicationId);
+  };
+
+  const handleSave = async () => {
     if (!user?.userId || !form.name || !form.dosage) {
       Alert.alert('Required', 'Medication name and dosage are required');
       return;
     }
+    setSaving(true);
     try {
-      await addMedication(
-        user.userId, form.name, form.dosage, form.frequency,
-        form.reminderTime, new Date().toISOString().split('T')[0], form.instructions,
-      );
+      if (editingId) {
+        await removeMedicationEntry(editingId);
+      }
+
+      const hasPermission = await requestNotificationPermission();
+      for (const time of form.reminderTimes) {
+        const newMed = await addMedication(
+          user.userId, form.name, form.dosage, form.frequency,
+          time, new Date().toISOString().split('T')[0], form.instructions,
+        );
+        if (hasPermission && newMed?.id) {
+          const notificationId = await scheduleMedicationReminder(newMed.id, form.name, form.dosage, time);
+          if (notificationId) {
+            await AsyncStorage.setItem(`reminder:${newMed.id}`, notificationId);
+          }
+        }
+      }
+      if (!hasPermission) {
+        Alert.alert(
+          'Notifications disabled',
+          'Enable notifications in your device settings to get medication reminders.'
+        );
+      }
+
       setModalVisible(false);
-      setForm({ name: '', dosage: '', frequency: 'Daily', reminderTime: '08:00', instructions: '' });
+      resetForm();
       fetchMedications();
-    } catch {
-      Alert.alert('Error', 'Could not add medication');
+    } catch (err: any) {
+      // Show the real reason (e.g. a validation message from the backend)
+      // instead of a generic string that hides what actually went wrong.
+      const message = err?.message || (editingId ? 'Could not update medication' : 'Could not add medication');
+      Alert.alert('Error', message);
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const handleDelete = (med: any) => {
+    Alert.alert('Delete medication', `Remove ${med.name} and cancel its reminders?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeMedicationEntry(med.id);
+            fetchMedications();
+          } catch {
+            Alert.alert('Error', 'Could not delete medication');
+          }
+        },
+      },
+    ]);
   };
 
   const handleDoseStatus = async (medicationId: string, status: string) => {
@@ -128,7 +247,7 @@ export default function MedicationsScreen() {
               <Text style={styles.screenLabel}>MEDICATIONS</Text>
               <Text style={styles.title}>My Medicines</Text>
             </View>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
+            <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
               <LinearGradient colors={GlassTheme.gradients.headerBg} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
               <Ionicons name="add" size={22} color="#FFFFFF" />
             </TouchableOpacity>
@@ -203,8 +322,18 @@ export default function MedicationsScreen() {
                               <Ionicons name="alarm-outline" size={11} color={GlassTheme.colors.textDim} /> {med.reminderTime}
                             </Text>
                           </View>
-                          <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
-                            <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
+                              <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
+                            </View>
+                            <View style={styles.cardIconRow}>
+                              <TouchableOpacity onPress={() => openEditModal(med)} hitSlop={8}>
+                                <Ionicons name="create-outline" size={16} color={GlassTheme.colors.textMuted} />
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => handleDelete(med)} hitSlop={8}>
+                                <Ionicons name="trash-outline" size={16} color={GlassTheme.colors.danger} />
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         </View>
                         {(med.doseStatus === 'PENDING' || !med.doseStatus) && (
@@ -276,7 +405,7 @@ export default function MedicationsScreen() {
           {/* ── History Tab ── */}
           {activeTab === 'history' && (
             <>
-              <Text style={styles.sectionTitle}>Dose History</Text>
+              <Text style={styles.sectionTitle}>Current Status</Text>
               {medications.length === 0 ? (
                 <GlassCard variant="flat" style={styles.emptyCard}>
                   <Ionicons name="time-outline" size={40} color={GlassTheme.colors.textDim} style={{ alignSelf: 'center' }} />
@@ -285,23 +414,15 @@ export default function MedicationsScreen() {
                 </GlassCard>
               ) : (
                 <>
-                  {/* Weekly adherence summary */}
-                  <GlassCard gradient style={styles.adherenceCard}>
-                    <Text style={styles.adherenceTitle}>This Week's Adherence</Text>
-                    <View style={styles.adherenceRow}>
-                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => {
-                        const taken = i < new Date().getDay();
-                        return (
-                          <View key={day} style={styles.adherenceDay}>
-                            <View style={[styles.adherenceDot, { backgroundColor: taken ? GlassTheme.colors.success : GlassTheme.colors.divider }]} />
-                            <Text style={styles.adherenceDayLabel}>{day}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
+                  <GlassCard variant="flat" style={styles.reminderTip}>
+                    <Ionicons name="information-circle-outline" size={18} color={GlassTheme.colors.primary} />
+                    <Text style={styles.reminderTipText}>
+                      This shows each medication's current status, not a day-by-day log yet. Real
+                      dose-by-dose history tracking is coming once it's wired up on the backend.
+                    </Text>
                   </GlassCard>
 
-                  {/* Per-medication history */}
+                  {/* Per-medication current status */}
                   {medications.map((med, index) => {
                     const s = statusColors[med.doseStatus ?? 'PENDING'];
                     const takenAt = med.doseStatus === 'TAKEN' ? med.reminderTime : null;
@@ -342,11 +463,18 @@ export default function MedicationsScreen() {
 
         {/* ── Add Medication Modal ── */}
         <Modal visible={modalVisible} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>Add Medication</Text>
-              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
+              <Text style={styles.modalTitle}>{editingId ? 'Edit Medication' : 'Add Medication'}</Text>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                style={{ flexShrink: 1 }}
+              >
                 <View style={{ gap: 14 }}>
                   {/* Drug name with autocomplete */}
                   <View>
@@ -384,7 +512,6 @@ export default function MedicationsScreen() {
                     )}
                   </View>
                   <GlassInput label="Dosage" icon="fitness-outline" value={form.dosage} onChangeText={(t) => setForm({ ...form, dosage: t })} placeholder="e.g. 500mg" />
-                  <GlassInput label="Reminder Time" icon="alarm-outline" value={form.reminderTime} onChangeText={(t) => setForm({ ...form, reminderTime: t })} placeholder="08:00" />
 
                   <View>
                     <Text style={styles.freqLabel}>Frequency</Text>
@@ -394,13 +521,32 @@ export default function MedicationsScreen() {
                           <TouchableOpacity
                             key={f}
                             style={[styles.freqChip, form.frequency === f && styles.freqChipActive]}
-                            onPress={() => setForm({ ...form, frequency: f })}
+                            onPress={() => handleFrequencyChange(f)}
                           >
                             <Text style={[styles.freqChipText, form.frequency === f && styles.freqChipTextActive]}>{f}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
                     </ScrollView>
+                  </View>
+
+                  <View>
+                    <Text style={styles.freqLabel}>
+                      Reminder Time{form.reminderTimes.length > 1 ? 's' : ''}
+                    </Text>
+                    <View style={{ gap: 8, marginTop: 8 }}>
+                      {form.reminderTimes.map((time, idx) => (
+                        <TouchableOpacity
+                          key={idx}
+                          style={styles.timeChip}
+                          onPress={() => setTimePickerIndex(idx)}
+                        >
+                          <Ionicons name="alarm-outline" size={16} color={GlassTheme.colors.primary} />
+                          <Text style={styles.timeChipText}>{formatTimeLabel(time)}</Text>
+                          <Ionicons name="chevron-forward" size={14} color={GlassTheme.colors.textDim} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
 
                   <View>
@@ -417,12 +563,36 @@ export default function MedicationsScreen() {
                 </View>
               </ScrollView>
               <View style={styles.modalActions}>
-                <GlassButton label="Cancel" variant="ghost" onPress={() => setModalVisible(false)} style={{ flex: 1 }} />
-                <GlassButton label="Save Medication" onPress={handleAdd} style={{ flex: 1 }} />
+                <GlassButton
+                  label="Cancel"
+                  variant="ghost"
+                  onPress={() => { setModalVisible(false); resetForm(); }}
+                  style={{ flex: 1 }}
+                />
+                <GlassButton
+                  label={editingId ? 'Save Changes' : 'Save Medication'}
+                  onPress={handleSave}
+                  loading={saving}
+                  style={{ flex: 1 }}
+                />
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
+
+        <TimePickerModal
+          visible={timePickerIndex !== null}
+          initialTime={timePickerIndex !== null ? form.reminderTimes[timePickerIndex] : undefined}
+          onCancel={() => setTimePickerIndex(null)}
+          onConfirm={(time) => {
+            setForm((prev) => {
+              const next = [...prev.reminderTimes];
+              next[timePickerIndex!] = time;
+              return { ...prev, reminderTimes: next };
+            });
+            setTimePickerIndex(null);
+          }}
+        />
       </SafeAreaView>
     </GlassBackground>
   );
@@ -490,6 +660,7 @@ const styles = StyleSheet.create({
   medTime: { color: GlassTheme.colors.textDim, fontSize: 11, marginTop: 3 },
   statusBadge: { borderRadius: GlassTheme.radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
   statusText: { fontSize: 11, fontWeight: '700' },
+  cardIconRow: { flexDirection: 'row', gap: 12, paddingRight: 2 },
 
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   takeBtn: {
@@ -510,7 +681,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28, borderTopRightRadius: 28,
     padding: 24, paddingBottom: 36,
-    gap: 16,
+    gap: 16, maxHeight: '88%',
     ...GlassTheme.shadow.lg,
   },
   modalHandle: {
@@ -534,6 +705,15 @@ const styles = StyleSheet.create({
   },
   freqChipText: { fontSize: 13, color: GlassTheme.colors.textMuted, fontWeight: '600' },
   freqChipTextActive: { color: '#FFFFFF' },
+
+  timeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderRadius: GlassTheme.radius.sm,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderWidth: 1.5, borderColor: GlassTheme.colors.divider,
+  },
+  timeChipText: { flex: 1, fontSize: 14, fontWeight: '600', color: GlassTheme.colors.text },
 
   textArea: {
     marginTop: 8,
@@ -583,12 +763,6 @@ const styles = StyleSheet.create({
   reminderTipText: { flex: 1, fontSize: 12, color: GlassTheme.colors.textMuted, lineHeight: 18 },
 
   // ── History ──
-  adherenceCard: { marginBottom: 12, gap: 12 },
-  adherenceTitle: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
-  adherenceRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  adherenceDay: { alignItems: 'center', gap: 6 },
-  adherenceDot: { width: 28, height: 28, borderRadius: 14 },
-  adherenceDayLabel: { fontSize: 10, color: GlassTheme.colors.textMuted, fontWeight: '600' },
   historyCard: { flexDirection: 'row', gap: 12, paddingBottom: 0 },
   historyLeft: { alignItems: 'center', paddingTop: 4 },
   historyIconWrap: {

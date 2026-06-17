@@ -30,7 +30,7 @@ export default function CommunityScreen() {
 
   const handleJoin = async (community: Community) => {
     if (!user?.userId) return Alert.alert('Login Required', 'Please log in to join communities.');
-    await joinCommunity(community.id, user.userId);
+    if (!community.joined) await joinCommunity(community.id, user.userId);
     router.push({ pathname: '/community/[id]' as any, params: { id: community.id, name: community.name, memberCount: String(community.memberCount) } });
   };
 
@@ -98,8 +98,11 @@ export default function CommunityScreen() {
                 </View>
 
                 <View style={[styles.joinBadge, { backgroundColor: group.joined ? GlassTheme.colors.successLight : `${group.color}18`, borderColor: group.joined ? GlassTheme.colors.success : group.color }]}>
+                  {group.joined && (
+                    <Ionicons name="checkmark" size={12} color={GlassTheme.colors.success} />
+                  )}
                   <Text style={[styles.joinText, { color: group.joined ? GlassTheme.colors.success : group.color }]}>
-                    {group.joined ? '✓ Joined' : 'Join'}
+                    {group.joined ? 'Joined' : 'Join'}
                   </Text>
                 </View>
               </GlassCard>
@@ -179,6 +182,7 @@ const styles = StyleSheet.create({
   dot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: GlassTheme.colors.textDim },
 
   joinBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     borderRadius: GlassTheme.radius.pill, paddingHorizontal: 12, paddingVertical: 6,
     borderWidth: 1.5,
     marginRight: 16,

@@ -14,6 +14,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useGreeting } from '@/hooks/useGreeting';
 import { useHealthTip } from '@/hooks/useHealthTip';
 import { getActiveMedicationCount, getPendingMedications } from '@/services/medicationService';
+import { getUnreadNotificationCount } from '@/services/notificationService';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function HomeScreen() {
   const healthTip = useHealthTip();
   const [medicationCount, setMedicationCount] = useState(0);
   const [reminders, setReminders] = useState<any[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const userId = user?.userId;
@@ -33,6 +35,7 @@ export default function HomeScreen() {
       setMedicationCount(typeof count === 'number' ? count : 0);
       const meds = await getPendingMedications(userId);
       setReminders(meds.slice(0, 3));
+      setUnreadNotifications(await getUnreadNotificationCount(userId));
     } catch { /* offline */ }
   }, [userId]);
 
@@ -68,12 +71,12 @@ export default function HomeScreen() {
           {/* ── Top Header ── */}
           <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.greeting}>{greeting} 👋</Text>
+              <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.name}>{getFirstName()}</Text>
             </View>
-            <TouchableOpacity style={styles.notifBtn}>
+            <TouchableOpacity style={styles.notifBtn} onPress={() => router.push('/notifications' as any)}>
               <Ionicons name="notifications-outline" size={22} color={GlassTheme.colors.primary} />
-              <View style={styles.notifDot} />
+              {(reminders.length > 0 || unreadNotifications > 0) && <View style={styles.notifDot} />}
             </TouchableOpacity>
           </Animated.View>
 

@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  Alert, FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -43,8 +43,14 @@ export default function ChatScreen() {
 
   const openChat = async (pharmacistId: string) => {
     if (!user?.userId) return;
-    const convo = await startConversation(user.userId, pharmacistId);
-    router.push(`/chat/${convo.id}` as any);
+    setShowSearch(false);
+    setSearch('');
+    try {
+      const convo = await startConversation(user.userId, pharmacistId);
+      router.push(`/chat/${convo.id}` as any);
+    } catch {
+      Alert.alert("Couldn't start chat", 'Check your connection and try again.');
+    }
   };
 
   return (
@@ -97,7 +103,7 @@ export default function ChatScreen() {
                   <TouchableOpacity
                     key={p.id}
                     style={styles.resultItem}
-                    onPress={() => { openChat(p.id); setShowSearch(false); setSearch(''); }}
+                    onPress={() => openChat(p.id)}
                     activeOpacity={0.75}
                   >
                     <View style={styles.resultAvatar}>

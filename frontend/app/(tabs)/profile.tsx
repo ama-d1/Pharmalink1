@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text,
+  Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
   TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import {
   logDose, updateHealthInfo, updateProfile, updateSettings, UserProfile,
 } from '@/services/profileService';
 import { getUserMedications } from '@/services/medicationService';
+import { getTwoFactorStatus, setTwoFactorEnabled } from '@/services/authService';
 
 function AdherenceRing({ percent }: { percent: number }) {
   const size = 44;
@@ -46,9 +47,16 @@ export default function ProfileScreen() {
   const { user, clearSession } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [editModal, setEditModal] = useState<'profile' | 'health' | 'book' | 'notifications' | 'privacy' | 'report' | null>(null);
+  const [editModal, setEditModal] = useState<'profile' | 'health' | 'book' | 'notifications' | 'privacy' | 'report' | 'logDose' | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [adherenceReport, setAdherenceReport] = useState<any>(null);
+  const [medsForLogging, setMedsForLogging] = useState<any[]>([]);
+  const [loggingDose, setLoggingDose] = useState(false);
+  // Coming-soon roadmap item #9: lives in auth-service, not Profile
+  // (user-profile-service) — this is a credential/security setting, not
+  // account data — so it's loaded and toggled separately from `profile`.
+  const [twoFactorEnabled, setTwoFactorEnabledState] = useState(false);
+  const [savingTwoFactor, setSavingTwoFactor] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!user?.userId) return;
@@ -58,6 +66,7 @@ export default function ProfileScreen() {
       const appts = await getAppointments(user.userId);
       setAppointments(appts);
     } catch { /* offline */ }
+    getTwoFactorStatus().then(setTwoFactorEnabledState);
   }, [user?.userId]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
@@ -76,11 +85,33 @@ export default function ProfileScreen() {
 
   const handleLogDose = async () => {
     if (!user?.userId) return;
-    const meds = await getUserMedications(user.userId);
-    if (!meds.length) return Alert.alert('No Medications', 'Add a medication first.');
-    await logDose(user.userId, meds[0].id);
-    loadProfile();
-    Alert.alert('Logged!', 'Dose recorded. Streak updated!');
+    try {
+      const meds = await getUserMedications(user.userId);
+      if (!meds.length) return Alert.alert('No Medications', 'Add a medication first.');
+      if (meds.length === 1) {
+        await handleLogDoseFor(meds[0].id);
+        return;
+      }
+      setMedsForLogging(meds);
+      setEditModal('logDose');
+    } catch {
+      Alert.alert('Something went wrong', "Couldn't load your medications. Please try again.");
+    }
+  };
+
+  const handleLogDoseFor = async (medicationId: string) => {
+    if (!user?.userId || loggingDose) return;
+    setLoggingDose(true);
+    try {
+      await logDose(user.userId, medicationId);
+      setEditModal(null);
+      await loadProfile();
+      Alert.alert('Logged!', 'Dose recorded. Streak updated!');
+    } catch {
+      Alert.alert('Something went wrong', "Couldn't log the dose. Please try again.");
+    } finally {
+      setLoggingDose(false);
+    }
   };
 
   const handleReport = async () => {
@@ -96,11 +127,51 @@ export default function ProfileScreen() {
 
   const saveEdit = async () => {
     if (!user?.userId) return;
-    if (editModal === 'profile') await updateProfile(user.userId, { fullName: form.fullName, phoneNumber: form.phone });
-    if (editModal === 'health') await updateHealthInfo(user.userId, { bloodGroup: form.bloodGroup, allergies: form.allergies, conditions: form.conditions });
-    if (editModal === 'book') await bookAppointment(user.userId, { professionalName: form.profName, specialty: form.specialty, appointmentDate: form.date, appointmentTime: form.time });
-    setEditModal(null);
-    loadProfile();
+    if (editModal === 'book') {
+      // Backend parses these with strict ISO formats (LocalDate.parse /
+      // LocalTime.parse) — validate up front so the user gets an immediate,
+      // specific message instead of a request that fails on the server.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date.trim())) {
+        Alert.alert('Invalid date', 'Please enter the date as YYYY-MM-DD, e.g. 2026-08-05.');
+        return;
+      }
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(form.time.trim())) {
+        Alert.alert('Invalid time', 'Please enter the time as HH:MM in 24-hour format, e.g. 14:30.');
+        return;
+      }
+    }
+    try {
+      if (editModal === 'profile') await updateProfile(user.userId, { fullName: form.fullName, phoneNumber: form.phone });
+      if (editModal === 'health') await updateHealthInfo(user.userId, { bloodGroup: form.bloodGroup, allergies: form.allergies, conditions: form.conditions });
+      if (editModal === 'book') await bookAppointment(user.userId, { professionalName: form.profName, specialty: form.specialty, appointmentDate: form.date.trim(), appointmentTime: form.time.trim() });
+      setEditModal(null);
+      loadProfile();
+    } catch (err: any) {
+      Alert.alert('Something went wrong', err?.message || "Couldn't save your changes. Please try again.");
+    }
+  };
+
+  const handleToggleSetting = async (key: string, current: boolean) => {
+    if (!user?.userId) return;
+    try {
+      await updateSettings(user.userId, { [key]: !current });
+      loadProfile();
+    } catch {
+      Alert.alert('Something went wrong', "Couldn't update that setting. Please try again.");
+    }
+  };
+
+  const handleToggleTwoFactor = async () => {
+    if (savingTwoFactor) return;
+    setSavingTwoFactor(true);
+    try {
+      const result = await setTwoFactorEnabled(!twoFactorEnabled);
+      setTwoFactorEnabledState(result);
+    } catch (err: any) {
+      Alert.alert('Something went wrong', err?.message || "Couldn't update that setting. Please try again.");
+    } finally {
+      setSavingTwoFactor(false);
+    }
   };
 
   const stats = [
@@ -258,7 +329,10 @@ export default function ProfileScreen() {
 
         {/* ── Edit Modal ── */}
         <Modal visible={!!editModal} transparent animationType="slide">
-          <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>
@@ -267,9 +341,15 @@ export default function ProfileScreen() {
                   : editModal === 'book' ? 'Book Appointment'
                   : editModal === 'notifications' ? 'Notifications'
                   : editModal === 'privacy' ? 'Privacy & Security'
+                  : editModal === 'logDose' ? 'Log a Dose'
                   : 'Adherence Report'}
               </Text>
-              <View style={{ gap: 12 }}>
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={{ gap: 12 }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
                 {editModal === 'profile' && (
                   <>
                     <GlassInput label="Full Name" icon="person-outline" placeholder="Your name" value={form.fullName} onChangeText={(t) => setForm({ ...form, fullName: t })} />
@@ -294,30 +374,32 @@ export default function ProfileScreen() {
                 {editModal === 'notifications' && (
                   <View style={{ gap: 0 }}>
                     {[
-                      { key: 'notificationsEnabled', label: 'Dose Reminders', sub: 'Alert when it\'s time to take a dose', icon: 'alarm-outline' },
-                      { key: 'emailNotifications', label: 'Email Notifications', sub: 'Receive updates by email', icon: 'mail-outline' },
-                      { key: 'communityAlerts', label: 'Community Activity', sub: 'New posts in your groups', icon: 'chatbubbles-outline' },
-                      { key: 'appointmentReminders', label: 'Appointment Reminders', sub: 'Reminder 24 hrs before appointments', icon: 'calendar-outline' },
+                      { key: 'notificationsEnabled', label: 'Dose Reminders', sub: 'Alert when it\'s time to take a dose', icon: 'alarm-outline', supported: true },
+                      { key: 'emailNotifications', label: 'Email Notifications', sub: 'Order updates and appointment reminders by email', icon: 'mail-outline', supported: true },
+                      { key: 'communityAlerts', label: 'Community Activity', sub: 'Get notified when someone comments on your posts', icon: 'chatbubbles-outline', supported: true },
+                      { key: 'appointmentReminders', label: 'Appointment Reminders', sub: 'Reminder 24 hrs before appointments', icon: 'calendar-outline', supported: true },
                     ].map((item, i, arr) => (
                       <View key={item.key}>
                         <TouchableOpacity
-                          style={styles.toggleRow}
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            if (!user?.userId) return;
-                            updateSettings(user.userId, { [item.key]: !(profile as any)?.[item.key] }).then(loadProfile);
-                          }}
+                          style={[styles.toggleRow, !item.supported && styles.toggleRowDisabled]}
+                          activeOpacity={item.supported ? 0.7 : 1}
+                          disabled={!item.supported}
+                          onPress={() => handleToggleSetting(item.key, !!(profile as any)?.[item.key])}
                         >
                           <View style={styles.toggleIcon}>
-                            <Ionicons name={item.icon as any} size={16} color={GlassTheme.colors.primary} />
+                            <Ionicons name={item.icon as any} size={16} color={item.supported ? GlassTheme.colors.primary : GlassTheme.colors.textDim} />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.toggleLabel}>{item.label}</Text>
-                            <Text style={styles.toggleSub}>{item.sub}</Text>
+                            <Text style={styles.toggleSub}>{item.supported ? item.sub : 'Coming soon'}</Text>
                           </View>
-                          <View style={[styles.togglePill, (profile as any)?.[item.key] && styles.togglePillOn]}>
-                            <View style={[styles.toggleThumb, (profile as any)?.[item.key] && styles.toggleThumbOn]} />
-                          </View>
+                          {item.supported ? (
+                            <View style={[styles.togglePill, (profile as any)?.[item.key] && styles.togglePillOn]}>
+                              <View style={[styles.toggleThumb, (profile as any)?.[item.key] && styles.toggleThumbOn]} />
+                            </View>
+                          ) : (
+                            <View style={styles.togglePill} />
+                          )}
                         </TouchableOpacity>
                         {i < arr.length - 1 && <View style={styles.settingsDivider} />}
                       </View>
@@ -327,29 +409,42 @@ export default function ProfileScreen() {
                 {editModal === 'privacy' && (
                   <View style={{ gap: 0 }}>
                     {[
-                      { key: 'privacyMode', label: 'Private Profile', sub: 'Hide your profile from other users', icon: 'eye-off-outline' },
-                      { key: 'shareHealthData', label: 'Share Health Data', sub: 'Allow anonymised data for research', icon: 'analytics-outline' },
-                      { key: 'twoFactorEnabled', label: 'Two-Factor Auth', sub: 'Extra security on login', icon: 'shield-outline' },
-                    ].map((item, i, arr) => (
+                      { key: 'privacyMode', label: 'Private Profile', sub: 'Hide your profile from other users', icon: 'eye-off-outline', supported: true },
+                      { key: 'shareHealthData', label: 'Share Health Data', sub: 'Allow anonymised data for research', icon: 'analytics-outline', supported: false },
+                      {
+                        key: 'twoFactorEnabled',
+                        label: 'Two-Factor Auth',
+                        sub: 'Email a code at login for extra security',
+                        icon: 'shield-outline',
+                        supported: true,
+                        // Coming-soon roadmap item #9: this one lives in
+                        // auth-service, not Profile — value/handler are
+                        // sourced differently from every other row here.
+                        value: twoFactorEnabled,
+                        onToggle: handleToggleTwoFactor,
+                      },
+                    ].map((item: any, i, arr) => (
                       <View key={item.key}>
                         <TouchableOpacity
-                          style={styles.toggleRow}
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            if (!user?.userId) return;
-                            updateSettings(user.userId, { [item.key]: !(profile as any)?.[item.key] }).then(loadProfile);
-                          }}
+                          style={[styles.toggleRow, !item.supported && styles.toggleRowDisabled]}
+                          activeOpacity={item.supported ? 0.7 : 1}
+                          disabled={!item.supported}
+                          onPress={() => item.onToggle ? item.onToggle() : handleToggleSetting(item.key, !!(profile as any)?.[item.key])}
                         >
                           <View style={styles.toggleIcon}>
-                            <Ionicons name={item.icon as any} size={16} color={GlassTheme.colors.primary} />
+                            <Ionicons name={item.icon as any} size={16} color={item.supported ? GlassTheme.colors.primary : GlassTheme.colors.textDim} />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.toggleLabel}>{item.label}</Text>
-                            <Text style={styles.toggleSub}>{item.sub}</Text>
+                            <Text style={styles.toggleSub}>{item.supported ? item.sub : 'Coming soon'}</Text>
                           </View>
-                          <View style={[styles.togglePill, (profile as any)?.[item.key] && styles.togglePillOn]}>
-                            <View style={[styles.toggleThumb, (profile as any)?.[item.key] && styles.toggleThumbOn]} />
-                          </View>
+                          {item.supported ? (
+                            <View style={[styles.togglePill, (item.value ?? (profile as any)?.[item.key]) && styles.togglePillOn]}>
+                              <View style={[styles.toggleThumb, (item.value ?? (profile as any)?.[item.key]) && styles.toggleThumbOn]} />
+                            </View>
+                          ) : (
+                            <View style={styles.togglePill} />
+                          )}
                         </TouchableOpacity>
                         {i < arr.length - 1 && <View style={styles.settingsDivider} />}
                       </View>
@@ -361,6 +456,29 @@ export default function ProfileScreen() {
                         <Text style={styles.dangerBtnText}>Delete Account</Text>
                       </TouchableOpacity>
                     </View>
+                  </View>
+                )}
+                {editModal === 'logDose' && (
+                  <View style={{ gap: 8 }}>
+                    <Text style={styles.pickerHint}>Which medication did you take?</Text>
+                    {medsForLogging.map((m) => (
+                      <TouchableOpacity
+                        key={m.id}
+                        style={styles.medPickRow}
+                        activeOpacity={0.75}
+                        disabled={loggingDose}
+                        onPress={() => handleLogDoseFor(m.id)}
+                      >
+                        <View style={styles.medPickIcon}>
+                          <Ionicons name="medkit-outline" size={18} color={GlassTheme.colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.medPickName}>{m.name}</Text>
+                          {!!m.dosage && <Text style={styles.medPickSub}>{m.dosage}</Text>}
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={GlassTheme.colors.textDim} />
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 )}
                 {editModal === 'report' && adherenceReport && (
@@ -384,7 +502,7 @@ export default function ProfileScreen() {
                     ))}
                   </View>
                 )}
-              </View>
+              </ScrollView>
               <View style={styles.modalActions}>
                 <GlassButton label="Close" variant="ghost" onPress={() => setEditModal(null)} style={{ flex: 1 }} />
                 {(editModal === 'profile' || editModal === 'health' || editModal === 'book') && (
@@ -392,7 +510,7 @@ export default function ProfileScreen() {
                 )}
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
     </GlassBackground>
@@ -477,8 +595,9 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, paddingBottom: 40, gap: 16,
+    padding: 24, paddingBottom: 40, gap: 16, maxHeight: '85%',
   },
+  modalScroll: { flexGrow: 0 },
   modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: GlassTheme.colors.divider, alignSelf: 'center', marginBottom: 4 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.text },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
@@ -504,6 +623,23 @@ const styles = StyleSheet.create({
     ...GlassTheme.shadow.sm,
   },
   toggleThumbOn: { alignSelf: 'flex-end' },
+  toggleRowDisabled: { opacity: 0.5 },
+
+  // ── Log Dose picker ──
+  pickerHint: { fontSize: 13, color: GlassTheme.colors.textMuted, marginBottom: 4 },
+  medPickRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: GlassTheme.radius.md,
+    borderWidth: 1, borderColor: GlassTheme.colors.divider,
+  },
+  medPickIcon: {
+    width: 36, height: 36, borderRadius: 11,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  medPickName: { fontSize: 14, fontWeight: '600', color: GlassTheme.colors.text },
+  medPickSub: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
 
   // ── Danger zone ──
   dangerZone: {
