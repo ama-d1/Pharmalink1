@@ -63,7 +63,7 @@ export default function LoginScreen() {
             marginTop: 4,
           }}
         >
-          Manage your medications with ease.
+          Manage your medications with ease everyday.
         </Text>
       </View>
 
