@@ -62,12 +62,12 @@ export default function HomeScreen() {
             <Text style={styles.actionLabel}>Order</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
+          {/* <TouchableOpacity style={styles.actionItem}>
             <View style={[styles.actionIcon, { backgroundColor: '#14B8A6' }]}>
               <Ionicons name="chatbubble-outline" size={24} color="#fff" />
             </View>
             <Text style={styles.actionLabel}>Chat</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
           <TouchableOpacity style={styles.actionItem}>
             <View style={[styles.actionIcon, { backgroundColor: '#F59E0B' }]}>
@@ -76,12 +76,12 @@ export default function HomeScreen() {
             <Text style={styles.actionLabel}>Pharmacy</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItem}>
+          {/* <TouchableOpacity style={styles.actionItem}>
             <View style={[styles.actionIcon, { backgroundColor: '#8B5CF6' }]}>
               <Ionicons name="people-outline" size={24} color="#fff" />
             </View>
             <Text style={styles.actionLabel}>Community</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
         </View>
       </View>
@@ -149,11 +149,11 @@ const styles = StyleSheet.create({
   medCardValue: { color: '#fff', fontSize: 30, fontWeight: '700', marginTop: 4 },
   medCardBadge: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginTop: 10 },
   medCardBadgeText: { color: '#15803D', fontSize: 11, fontWeight: '600' },
-  section: { paddingHorizontal: 20, paddingTop: 24 },
+  section: { paddingHorizontal: 20, paddingTop: 24, justifyContent: 'center',  gap: 12, marginBottom: 8 }, 
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 14 },
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14,  gap: 8, },
   seeAll: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
-  actionsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  actionsRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 14, gap: 24, },
   actionItem: { alignItems: 'center', gap: 8 },
   actionIcon: { width: 64, height: 64, borderRadius: 18, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
   actionLabel: { fontSize: 12, fontWeight: '600', color: '#374151' },
@@ -167,4 +167,5 @@ const styles = StyleSheet.create({
   tipCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 32, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
   tipLabel: { fontSize: 13, fontWeight: '700', color: '#2563EB' },
   tipText: { fontSize: 13, color: '#374151', lineHeight: 20 },
+  
 });

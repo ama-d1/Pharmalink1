@@ -418,36 +418,7 @@ export default function CommunityScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* CREATE COMMUNITY BUTTON */}
-      <View style={{ paddingHorizontal: 20, paddingBottom: 30 }}>
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#2563EB',
-            borderRadius: 16,
-            padding: 18,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons
-            name="add-circle-outline"
-            size={22}
-            color="#FFFFFF"
-          />
-
-          <Text
-            style={{
-              color: '#FFFFFF',
-              fontWeight: 'bold',
-              fontSize: 15,
-              marginLeft: 8,
-            }}
-          >
-            Create a Community
-          </Text>
-        </TouchableOpacity>
-      </View>
+    
 
     </ScrollView>
   );

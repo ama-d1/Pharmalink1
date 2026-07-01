@@ -47,10 +47,37 @@ public class User {
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
+ @Column(unique=true)
+private String resetToken;
+
+
+private LocalDateTime resetTokenExpiry;
+
     private LocalDateTime updatedAt;
 
     public User() {}
 
+   public String getResetToken(){
+    return resetToken;
+}
+
+
+public void setResetToken(String resetToken){
+    this.resetToken = resetToken;
+}
+
+
+
+public LocalDateTime getResetTokenExpiry(){
+    return resetTokenExpiry;
+}
+
+
+public void setResetTokenExpiry(
+LocalDateTime resetTokenExpiry
+){
+    this.resetTokenExpiry = resetTokenExpiry;
+}
     public String getId() { return id; }
 
     public void setId(String id) { this.id = id; }
