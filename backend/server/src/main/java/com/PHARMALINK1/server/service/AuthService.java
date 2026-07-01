@@ -1,4 +1,7 @@
 package com.PHARMALINK1.server.service;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -12,6 +15,8 @@ import com.PHARMALINK1.server.security.JwtService;
 
 @Service
 public class AuthService {
+    @Autowired
+private EmailService emailService;
 
     @Autowired
     private UserRepository userRepository;
@@ -72,4 +77,94 @@ public class AuthService {
             "Login successful"
         );
     }
+    public void forgotPassword(String email){
+
+
+User user =
+userRepository.findByEmail(email)
+.orElseThrow(
+()->new RuntimeException("Email does not exist")
+);
+
+
+
+String token =
+UUID.randomUUID().toString();
+
+
+
+user.setResetToken(token);
+
+
+user.setResetTokenExpiry(
+LocalDateTime.now().plusMinutes(30)
+);
+
+
+
+userRepository.save(user);
+
+
+
+emailService.sendResetEmail(
+email,
+token
+);
+
+
+}
+public void resetPassword(
+String token,
+String password
+){
+
+
+User user =
+userRepository.findByResetToken(token)
+.orElseThrow(
+()->new RuntimeException("Invalid token")
+);
+
+
+
+if(user.getResetTokenExpiry()
+.isBefore(LocalDateTime.now())){
+
+
+throw new RuntimeException(
+"Token expired"
+);
+
+}
+
+
+
+user.setPassword(
+passwordEncoder.encode(password)
+);
+
+
+user.setResetToken(null);
+
+user.setResetTokenExpiry(null);
+
+
+
+userRepository.save(user);
+
+
+}
+public void sendResetPasswordEmail(String email){
+
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(
+                () -> new RuntimeException("Email not found")
+            );
+
+
+    System.out.println(
+        "RESET EMAIL FOR: " + user.getEmail()
+    );
+
+}
 }

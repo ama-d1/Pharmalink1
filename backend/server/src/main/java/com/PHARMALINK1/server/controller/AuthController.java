@@ -13,6 +13,7 @@ import com.PHARMALINK1.server.dto.AuthResponse;
 import com.PHARMALINK1.server.dto.LoginRequest;
 import com.PHARMALINK1.server.dto.RegisterRequest;
 import com.PHARMALINK1.server.service.AuthService;
+import com.PHARMALINK1.server.dto.ResetPasswordRequest;
 
 import jakarta.validation.Valid;
 
@@ -47,6 +48,24 @@ public class AuthController {
             );
         }
     }
+    @PostMapping("/reset-password")
+public ResponseEntity<?> resetPassword(
+@RequestBody ResetPasswordRequest request
+){
+
+
+authService.resetPassword(
+request.getToken(),
+request.getPassword()
+);
+
+
+return ResponseEntity.ok(
+"Password updated successfully"
+);
+
+}
+
 
     @GetMapping("/health")
     public ResponseEntity<String> health() {
