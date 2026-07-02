@@ -1,200 +1,242 @@
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  FlatList,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+  FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInRight } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { GlassBackground } from '@/components/glass/GlassBackground';
+import { GlassCard } from '@/components/glass/GlassCard';
+import { GlassTheme } from '@/constants/glassTheme';
+import { useAuth } from '@/context/AuthContext';
+import { getConversationsForUser, searchPharmacists, startConversation } from '@/services/ChatClient';
+
+type Pharmacist = { id: string; fullName: string; pharmacyName: string };
 
 export default function ChatScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const [pharmacists, setPharmacists] = useState<Pharmacist[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
 
-  const [conversations] = useState([
-    {
-      id: "1",
-      name: "Pharm. Kwame Mensah",
-      lastMessage: "Your prescription has been verified ✅",
-      time: "10:45 AM",
-      unread: 2,
-    },
-    {
-      id: "2",
-      name: "Pharm. Abena Osei",
-      lastMessage: "How are you feeling after taking the medication?",
-      time: "Yesterday",
-      unread: 0,
-    },
-    {
-      id: "3",
-      name: "Pharm. Daniel Addo",
-      lastMessage: "Your order is ready for pickup",
-      time: "2d ago",
-      unread: 1,
-    },
-  ]);
+  const loadData = useCallback(async () => {
+    if (!user?.userId) return;
+    try {
+      const convos = await getConversationsForUser(user.userId);
+      setConversations(convos);
+    } catch { /* fallback */ }
+  }, [user?.userId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (search.length > 1) {
+      searchPharmacists(search).then(setPharmacists).catch(() => setPharmacists([]));
+    } else {
+      setPharmacists([]);
+    }
+  }, [search]);
+
+  const openChat = async (pharmacistId: string) => {
+    if (!user?.userId) return;
+    const convo = await startConversation(user.userId, pharmacistId);
+    router.push(`/chat/${convo.id}` as any);
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <Text style={styles.headerSubtitle}>
-          Connect with pharmacists
-        </Text>
-      </View>
+    <GlassBackground>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search pharmacists or chats..."
-          placeholderTextColor="#9CA3AF"
-        />
-      </View>
-
-      {/* Chat List */}
-      <FlatList
-        data={conversations}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
+        {/* ── Top Header ── */}
+        <LinearGradient
+          colors={GlassTheme.gradients.headerBg}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.headerBubble} />
+          <View style={{ flex: 1, zIndex: 1 }}>
+            <Text style={styles.title}>Messages</Text>
+            <Text style={styles.subtitle}>Chat with your pharmacist</Text>
+          </View>
           <TouchableOpacity
-            style={styles.chatItem}
-            onPress={() => router.push(`/chat/${item.id}` as any)}
+            style={styles.searchToggle}
+            onPress={() => setShowSearch(!showSearch)}
           >
-            <View style={styles.avatar}>
-              <Text style={{ fontSize: 28 }}>💊</Text>
+            <Ionicons name={showSearch ? 'close' : 'search'} size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </LinearGradient>
+
+        {/* ── Pharmacist Search ── */}
+        {showSearch && (
+          <View style={styles.searchPanel}>
+            <View style={styles.searchRow}>
+              <Ionicons name="search-outline" size={18} color={GlassTheme.colors.textDim} style={{ marginLeft: 12 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by name or pharmacy..."
+                placeholderTextColor={GlassTheme.colors.textDim}
+                value={search}
+                onChangeText={setSearch}
+                autoFocus
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch('')} style={{ paddingRight: 12 }}>
+                  <Ionicons name="close-circle" size={18} color={GlassTheme.colors.textDim} />
+                </TouchableOpacity>
+              )}
             </View>
-
-            <View style={styles.chatInfo}>
-              <View style={styles.chatHeader}>
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.time}>{item.time}</Text>
-              </View>
-
-              <Text
-                style={styles.lastMessage}
-                numberOfLines={1}
-              >
-                {item.lastMessage}
-              </Text>
-            </View>
-
-            {item.unread > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadText}>
-                  {item.unread}
-                </Text>
+            {pharmacists.length > 0 && (
+              <View style={styles.resultsWrap}>
+                {pharmacists.map((p) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={styles.resultItem}
+                    onPress={() => { openChat(p.id); setShowSearch(false); setSearch(''); }}
+                    activeOpacity={0.75}
+                  >
+                    <View style={styles.resultAvatar}>
+                      <Ionicons name="medical" size={18} color={GlassTheme.colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.resultName}>{p.fullName}</Text>
+                      <Text style={styles.resultPharmacy}>{p.pharmacyName}</Text>
+                    </View>
+                    <Ionicons name="chatbubble-outline" size={16} color={GlassTheme.colors.primary} />
+                  </TouchableOpacity>
+                ))}
               </View>
             )}
-          </TouchableOpacity>
+          </View>
         )}
-      />
-    </SafeAreaView>
+
+        {/* ── Conversation List ── */}
+        <FlatList
+          data={conversations}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            conversations.length > 0 ? (
+              <Text style={styles.listLabel}>Recent Conversations</Text>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="chatbubbles-outline" size={40} color={GlassTheme.colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>No conversations yet</Text>
+              <Text style={styles.emptyHint}>Search for a pharmacist above to start chatting</Text>
+            </View>
+          }
+          renderItem={({ item, index }) => (
+            <Animated.View entering={FadeInRight.delay(index * 60).duration(350)}>
+              <GlassCard onPress={() => router.push(`/chat/${item.id}` as any)} style={styles.convoCard}>
+                <View style={styles.convoAvatar}>
+                  <Ionicons name="medical" size={22} color={GlassTheme.colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.convoName}>Pharmacist Chat</Text>
+                  <Text style={styles.convoPreview} numberOfLines={1}>Tap to open conversation</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={GlassTheme.colors.textDim} />
+              </GlassCard>
+            </Animated.View>
+          )}
+        />
+      </SafeAreaView>
+    </GlassBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F8FAFC",
-  },
-
   header: {
-    backgroundColor: "#2563EB",
-    paddingTop: 60,
-    paddingBottom: 24,
-    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    gap: 12,
+    overflow: 'hidden',
+  },
+  headerBubble: {
+    position: 'absolute', top: -30, right: -20,
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  subtitle: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  searchToggle: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
   },
 
-  headerTitle: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    fontWeight: "bold",
+  searchPanel: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: GlassTheme.colors.divider,
+    ...GlassTheme.shadow.sm,
   },
-
-  headerSubtitle: {
-    color: "#E0F2FE",
-    marginTop: 4,
-    fontSize: 13,
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderRadius: GlassTheme.radius.pill,
+    borderWidth: 1.5, borderColor: GlassTheme.colors.divider,
   },
-
-  searchContainer: {
-    padding: 16,
-    backgroundColor: "#FFFFFF",
-  },
-
   searchInput: {
-    backgroundColor: "#F4F6FA",
-    borderRadius: 999,
-    padding: 14,
-    fontSize: 16,
+    flex: 1, paddingVertical: 11, paddingHorizontal: 10,
+    fontSize: 14, color: GlassTheme.colors.text,
+  },
+  resultsWrap: {
+    marginTop: 8,
+    borderRadius: GlassTheme.radius.md,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: "#E8ECF4",
+    borderColor: GlassTheme.colors.divider,
+    overflow: 'hidden',
+    ...GlassTheme.shadow.sm,
   },
+  resultItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderBottomWidth: 1, borderBottomColor: GlassTheme.colors.divider,
+  },
+  resultAvatar: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  resultName: { color: GlassTheme.colors.text, fontWeight: '600', fontSize: 14 },
+  resultPharmacy: { color: GlassTheme.colors.textMuted, fontSize: 12, marginTop: 2 },
 
-  chatItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    marginHorizontal: 16,
-    marginVertical: 8,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
+  listContent: { padding: 20, gap: 10, paddingBottom: 110 },
+  listLabel: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  avatar: {
-    width: 56,
-    height: 56,
-    backgroundColor: "#DBEAFE",
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
+  convoCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  convoAvatar: {
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
   },
+  convoName: { color: GlassTheme.colors.text, fontWeight: '700', fontSize: 15 },
+  convoPreview: { color: GlassTheme.colors.textMuted, fontSize: 13, marginTop: 2 },
 
-  chatInfo: {
-    flex: 1,
-    marginLeft: 16,
+  emptyWrap: { alignItems: 'center', paddingTop: 60, gap: 12 },
+  emptyIcon: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
   },
-
-  chatHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  name: {
-    fontSize: 17,
-    fontWeight: "600",
-    color: "#111827",
-  },
-
-  time: {
-    color: "#6B7280",
-    fontSize: 13,
-  },
-
-  lastMessage: {
-    color: "#475569",
-    marginTop: 4,
-  },
-
-  unreadBadge: {
-    backgroundColor: "#2563EB",
-    width: 24,
-    height: 24,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  unreadText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: GlassTheme.colors.text },
+  emptyHint: { fontSize: 13, color: GlassTheme.colors.textMuted, textAlign: 'center', maxWidth: 240 },
 });

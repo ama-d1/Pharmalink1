@@ -44,6 +44,17 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    private String profilePictureUrl;
+    private String bloodGroup;
+    private String allergies;
+    private String conditions;
+    private Double adherenceRate = 0.0;
+    private Integer dayStreak = 0;
+    private boolean notificationsEnabled = true;
+    private boolean privacyMode = false;
+    private String pharmacyId;
+    private String pharmacyName;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -105,6 +116,36 @@ LocalDateTime resetTokenExpiry
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    public String getProfilePictureUrl() { return profilePictureUrl; }
+    public void setProfilePictureUrl(String profilePictureUrl) { this.profilePictureUrl = profilePictureUrl; }
+
+    public String getBloodGroup() { return bloodGroup; }
+    public void setBloodGroup(String bloodGroup) { this.bloodGroup = bloodGroup; }
+
+    public String getAllergies() { return allergies; }
+    public void setAllergies(String allergies) { this.allergies = allergies; }
+
+    public String getConditions() { return conditions; }
+    public void setConditions(String conditions) { this.conditions = conditions; }
+
+    public Double getAdherenceRate() { return adherenceRate; }
+    public void setAdherenceRate(Double adherenceRate) { this.adherenceRate = adherenceRate; }
+
+    public Integer getDayStreak() { return dayStreak; }
+    public void setDayStreak(Integer dayStreak) { this.dayStreak = dayStreak; }
+
+    public boolean isNotificationsEnabled() { return notificationsEnabled; }
+    public void setNotificationsEnabled(boolean notificationsEnabled) { this.notificationsEnabled = notificationsEnabled; }
+
+    public boolean isPrivacyMode() { return privacyMode; }
+    public void setPrivacyMode(boolean privacyMode) { this.privacyMode = privacyMode; }
+
+    public String getPharmacyId() { return pharmacyId; }
+    public void setPharmacyId(String pharmacyId) { this.pharmacyId = pharmacyId; }
+
+    public String getPharmacyName() { return pharmacyName; }
+    public void setPharmacyName(String pharmacyName) { this.pharmacyName = pharmacyName; }
 
     @PrePersist
     protected void onCreate() {
