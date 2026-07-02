@@ -1,6 +1,7 @@
 package com.PHARMALINK1.server.controller;
 
 import com.PHARMALINK1.server.dto.MessageRequest;
+import com.PHARMALINK1.server.dto.PharmacistSearchResponse;
 import com.PHARMALINK1.server.model.Conversation;
 import com.PHARMALINK1.server.model.Message;
 import com.PHARMALINK1.server.service.ChatService;
@@ -40,5 +41,12 @@ public class ChatController {
     @GetMapping("/conversations/{userId}")
     public ResponseEntity<List<Conversation>> getConversations(@PathVariable String userId) {
         return ResponseEntity.ok(chatService.getConversationsForUser(userId));
+    }
+
+    @GetMapping("/pharmacists/search")
+    public ResponseEntity<List<PharmacistSearchResponse>> searchPharmacists(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String pharmacyId) {
+        return ResponseEntity.ok(chatService.searchPharmacists(q, pharmacyId));
     }
 }

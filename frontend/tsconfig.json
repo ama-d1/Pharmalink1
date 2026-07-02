@@ -3,7 +3,6 @@
   "compilerOptions": {
     "strict": true,
     "jsx": "react-jsx",
-    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
@@ -14,5 +13,5 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "app/(tabs)/chat.js"  ]
+  ]
 }

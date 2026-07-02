@@ -1,616 +1,535 @@
-import React from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+  Alert, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text,
+  TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
 import { router } from 'expo-router';
-
-type HealthStat = {
-  id: string;
-  label: string;
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  percent?: number;
-};
-
-type HealthInfoItem = {
-  label: string;
-  value: string;
-  tone?: 'default' | 'danger' | 'success';
-};
-
-type SettingsItem = {
-  id: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  iconBg: string;
-  textColor?: string;
-};
-
-type QuickAction = {
-  id: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-};
-
-const colors = {
-  bg: '#F8FAFC',
-  card: '#FFFFFF',
-
-  primary: '#2563EB',
-  primarySoft: '#DBEAFE',
-
-  text: '#1F2937',
-  muted: '#6B7280',
-
-  border: '#E5E7EB',
-
-  danger: '#EF4444',
-  dangerSoft: '#FEE2E2',
-
-  success: '#10B981',
-  successSoft: '#DCFCE7',
-
-  purpleSoft: '#EDE9FE',
-  greenSoft: '#CCFBF1',
-};
-
-const profile = {
-  name: 'Ama Dansoa',
-  email: 'ama@gmail.com',
-  initials: 'AD',
-  isPremium: true,
-  stats: [
-    { id: 'meds', label: 'Medications', value: '3', icon: 'medkit-outline' },
-    {
-      id: 'adherence',
-      label: 'Adherence',
-      value: '92%',
-      icon: 'checkmark-circle-outline',
-      percent: 92,
-    },
-    { id: 'streak', label: 'Day streak', value: '12', icon: 'flame-outline' },
-    {
-      id: 'appts',
-      label: 'Appointments',
-      value: '5',
-      icon: 'calendar-outline',
-    },
-  ] as HealthStat[],
-  healthInfo: [
-    { label: 'Blood group', value: 'O+', tone: 'default' },
-    { label: 'Allergies', value: 'Penicillin', tone: 'danger' },
-    { label: 'Condition', value: 'Diabetes', tone: 'default' },
-  ] as HealthInfoItem[],
-};
-
-const quickActions: QuickAction[] = [
-  { id: 'dose', label: 'Log dose', icon: 'add-circle-outline' },
-  { id: 'book', label: 'Book', icon: 'calendar-outline' },
-  { id: 'report', label: 'Report', icon: 'bar-chart-outline' },
-];
-
-const settingsItems: SettingsItem[] = [
-  {
-    id: 'edit',
-    label: 'Edit profile',
-    icon: 'person-outline',
-    iconBg: colors.primarySoft,
-  },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: 'notifications-outline',
-    iconBg: colors.greenSoft,
-  },
-  {
-    id: 'privacy',
-    label: 'Privacy & security',
-    icon: 'shield-checkmark-outline',
-    iconBg: colors.purpleSoft,
-  },
-  {
-    id: 'logout',
-    label: 'Log out',
-    icon: 'log-out-outline',
-    iconBg: colors.dangerSoft,
-    textColor: colors.danger,
-  },
-];
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { GlassBackground } from '@/components/glass/GlassBackground';
+import { GlassButton } from '@/components/glass/GlassButton';
+import { GlassCard } from '@/components/glass/GlassCard';
+import { GlassInput } from '@/components/glass/GlassInput';
+import { GlassTheme } from '@/constants/glassTheme';
+import { useAuth } from '@/context/AuthContext';
+import {
+  bookAppointment, getAdherenceReport, getAppointments, getProfile,
+  logDose, updateHealthInfo, updateProfile, updateSettings, UserProfile,
+} from '@/services/profileService';
+import { getUserMedications } from '@/services/medicationService';
 
 function AdherenceRing({ percent }: { percent: number }) {
-  const size = 42;
+  const size = 44;
   const stroke = 4;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percent / 100) * circumference;
-
   return (
     <Svg width={size} height={size}>
+      <Circle cx={size / 2} cy={size / 2} r={radius} stroke={GlassTheme.colors.divider} strokeWidth={stroke} fill="none" />
       <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke="#E5E7EB"
-        strokeWidth={stroke}
-        fill="none"
-      />
-      <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke="#2563EB"
-        strokeWidth={stroke}
-        fill="none"
+        cx={size / 2} cy={size / 2} r={radius}
+        stroke={GlassTheme.colors.primary} strokeWidth={stroke} fill="none"
         strokeDasharray={`${circumference} ${circumference}`}
         strokeDashoffset={offset}
-        rotation="-90"
-        origin={`${size / 2}, ${size / 2}`}
+        rotation="-90" origin={`${size / 2}, ${size / 2}`}
+        strokeLinecap="round"
       />
     </Svg>
   );
 }
 
-function SectionTitle({
-  title,
-  actionLabel,
-  onActionPress,
-}: {
-  title: string;
-  actionLabel?: string;
-  onActionPress?: () => void;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {actionLabel ? (
-        <Pressable onPress={onActionPress} hitSlop={8}>
-          <Text style={styles.sectionAction}>{actionLabel}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function ProfileHeader() {
-  return (
-    <View style={styles.headerCard}>
-      <View style={styles.avatarWrap}>
-        <View style={styles.avatar}>
-          <Text style={styles.initials}>{profile.initials}</Text>
-        </View>
-        <Pressable style={styles.avatarEditBadge}>
-          <Ionicons name="camera-outline" size={14} color={colors.primary} />
-        </Pressable>
-      </View>
-
-      <Text style={styles.name}>{profile.name}</Text>
-      <Text style={styles.email}>{profile.email}</Text>
-
-      {profile.isPremium ? (
-        <View style={styles.premiumBadge}>
-          <Ionicons name="star" size={12} color={colors.primary} />
-          <Text style={styles.premiumText}>Premium member</Text>
-        </View>
-      ) : null}
-
-      <Text style={styles.greeting}>Good morning, Ama</Text>
-    </View>
-  );
-}
-
-function HealthSummaryGrid() {
-  return (
-    <View style={styles.sectionBlock}>
-      <SectionTitle title="HEALTH SUMMARY" />
-      <View style={styles.grid}>
-        {profile.stats.map((stat) => (
-          <Pressable
-            key={stat.id}
-            style={({ pressed }) => [
-              styles.statCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => Alert.alert(stat.label, `Open ${stat.label} screen`)}
-            accessibilityRole="button"
-            accessibilityLabel={`${stat.value} ${stat.label}`}
-          >
-            {stat.percent !== undefined ? (
-              <AdherenceRing percent={stat.percent} />
-            ) : (
-              <View style={styles.iconBubble}>
-                <Ionicons name={stat.icon} size={18} color={colors.primary} />
-              </View>
-            )}
-            <Text style={styles.statValue}>{stat.value}</Text>
-            <Text style={styles.statLabel}>{stat.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function QuickActionsRow() {
-  return (
-    <View style={styles.sectionBlock}>
-      <SectionTitle title="QUICK ACTIONS" />
-      <View style={styles.quickActionsRow}>
-        {quickActions.map((action) => (
-          <Pressable
-            key={action.id}
-            style={({ pressed }) => [
-              styles.quickAction,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => Alert.alert(action.label, 'Coming soon')}
-            accessibilityRole="button"
-            accessibilityLabel={action.label}
-          >
-            <Ionicons name={action.icon} size={18} color={colors.primary} />
-            <Text style={styles.quickActionText}>{action.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function HealthInfoSection() {
-  const toneStyles = {
-    default: { color: colors.primary },
-    danger: { color: colors.danger },
-    success: { color: colors.success },
-  } as const;
-
-  return (
-    <View style={styles.sectionBlock}>
-      <SectionTitle
-        title="HEALTH INFO"
-        actionLabel="Edit"
-        onActionPress={() => Alert.alert('Edit', 'Open health info editor')}
-      />
-      <View style={styles.listCard}>
-        {profile.healthInfo.map((item, index) => (
-          <View key={item.label}>
-            <View style={styles.listRow}>
-              <Text style={styles.listLabel}>{item.label}</Text>
-              <Text
-                style={[
-                  styles.listValue,
-                  toneStyles[item.tone ?? 'default'],
-                ]}
-              >
-                {item.value}
-              </Text>
-            </View>
-            {index < profile.healthInfo.length - 1 ? (
-              <View style={styles.divider} />
-            ) : null}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function SettingsSection() {
- const handlePress = (item: SettingsItem) => {
-  if (item.id === 'logout') {
-    Alert.alert(
-      'Log out',
-      'Are you sure you want to log out?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Log out',
-          style: 'destructive',
-          onPress: () => {
-           console.log('User logged out');
-            router.replace('/login');
-            console.log('User logged out');
-          },
-        },
-      ]
-    );
-    return;
-  }
-
-  Alert.alert(item.label, 'Coming soon');
-};
-
-  return (
-    <View style={styles.sectionBlock}>
-      <SectionTitle title="SETTINGS" />
-      <View style={styles.listCard}>
-        {settingsItems.map((item, index) => (
-          <View key={item.id}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.settingsRow,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => handlePress(item)}
-              accessibilityRole="button"
-              accessibilityLabel={item.label}
-            >
-              <View
-                style={[styles.settingsIconWrap, { backgroundColor: item.iconBg }]}
-              >
-                <Ionicons
-                  name={item.icon}
-                  size={18}
-                  color={item.textColor ?? colors.text}
-                />
-              </View>
-
-              <Text
-                style={[
-                  styles.settingsLabel,
-                  item.textColor ? { color: item.textColor } : null,
-                ]}
-              >
-                {item.label}
-              </Text>
-
-              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-            </Pressable>
-
-            {index < settingsItems.length - 1 ? (
-              <View style={styles.divider} />
-            ) : null}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 export default function ProfileScreen() {
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <ProfileHeader />
-        <HealthSummaryGrid />
-        <QuickActionsRow />
-        <HealthInfoSection />
-        <SettingsSection />
+  const { user, clearSession } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [editModal, setEditModal] = useState<'profile' | 'health' | 'book' | 'notifications' | 'privacy' | 'report' | null>(null);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [adherenceReport, setAdherenceReport] = useState<any>(null);
 
-        <Text style={styles.footerText}>App version 1.0.0</Text>
-      </ScrollView>
-    </SafeAreaView>
+  const loadProfile = useCallback(async () => {
+    if (!user?.userId) return;
+    try {
+      const data = await getProfile(user.userId);
+      setProfile(data);
+      const appts = await getAppointments(user.userId);
+      setAppointments(appts);
+    } catch { /* offline */ }
+  }, [user?.userId]);
+
+  useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  const initials = profile?.fullName?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() ?? 'PL';
+
+  const handleLogout = () => {
+    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log Out', style: 'destructive',
+        onPress: async () => { await clearSession(); router.replace('/login'); },
+      },
+    ]);
+  };
+
+  const handleLogDose = async () => {
+    if (!user?.userId) return;
+    const meds = await getUserMedications(user.userId);
+    if (!meds.length) return Alert.alert('No Medications', 'Add a medication first.');
+    await logDose(user.userId, meds[0].id);
+    loadProfile();
+    Alert.alert('Logged!', 'Dose recorded. Streak updated!');
+  };
+
+  const handleReport = async () => {
+    if (!user?.userId) return;
+    try {
+      const report = await getAdherenceReport(user.userId);
+      setAdherenceReport(report);
+    } catch {
+      setAdherenceReport({ adherenceRate: 0, dayStreak: 0, totalDosesLogged: 0 });
+    }
+    setEditModal('report');
+  };
+
+  const saveEdit = async () => {
+    if (!user?.userId) return;
+    if (editModal === 'profile') await updateProfile(user.userId, { fullName: form.fullName, phoneNumber: form.phone });
+    if (editModal === 'health') await updateHealthInfo(user.userId, { bloodGroup: form.bloodGroup, allergies: form.allergies, conditions: form.conditions });
+    if (editModal === 'book') await bookAppointment(user.userId, { professionalName: form.profName, specialty: form.specialty, appointmentDate: form.date, appointmentTime: form.time });
+    setEditModal(null);
+    loadProfile();
+  };
+
+  const stats = [
+    { id: 'meds', label: 'Medications', value: String(profile?.medicationCount ?? 0), icon: 'medkit-outline' as const, color: GlassTheme.colors.primary, bg: GlassTheme.colors.primaryLight },
+    { id: 'adherence', label: 'Adherence', value: `${Math.round(profile?.adherenceRate ?? 0)}%`, percent: profile?.adherenceRate ?? 0, color: GlassTheme.colors.accent, bg: GlassTheme.colors.accentLight },
+    { id: 'streak', label: 'Day Streak', value: String(profile?.dayStreak ?? 0), icon: 'flame-outline' as const, color: GlassTheme.colors.amber, bg: GlassTheme.colors.amberLight },
+    { id: 'appts', label: 'Appointments', value: String(profile?.appointmentCount ?? 0), icon: 'calendar-outline' as const, color: GlassTheme.colors.violet, bg: GlassTheme.colors.violetLight },
+  ];
+
+  const settingsItems = [
+    { label: 'Edit Profile', icon: 'person-outline' as const, action: () => { setForm({ fullName: profile?.fullName ?? '', phone: profile?.phoneNumber ?? '' }); setEditModal('profile'); } },
+    { label: 'Notifications', icon: 'notifications-outline' as const, action: () => setEditModal('notifications') },
+    { label: 'Privacy & Security', icon: 'shield-checkmark-outline' as const, action: () => setEditModal('privacy') },
+    { label: 'Log Out', icon: 'log-out-outline' as const, action: handleLogout, danger: true },
+  ];
+
+  return (
+    <GlassBackground>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+          {/* ── Profile Header ── */}
+          <Animated.View entering={FadeInDown.duration(400)}>
+            <LinearGradient
+              colors={GlassTheme.gradients.headerBg}
+              style={styles.profileHeader}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.headerBubble} />
+              <View style={styles.avatarCircle}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+              <Text style={styles.profileName}>{profile?.fullName ?? user?.fullName}</Text>
+              <Text style={styles.profileEmail}>{profile?.email ?? user?.email}</Text>
+              <View style={styles.roleBadge}>
+                <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
+                <Text style={styles.roleText}>{user?.role ?? 'Patient'}</Text>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+
+          {/* ── Stats Grid ── */}
+          <Text style={styles.sectionLabel}>Health Summary</Text>
+          <View style={styles.statsGrid}>
+            {stats.map((s, i) => (
+              <Animated.View key={s.id} entering={FadeInDown.delay(i * 60).duration(300)} style={styles.statCell}>
+                <GlassCard style={styles.statCard}>
+                  {'percent' in s && s.percent !== undefined ? (
+                    <View style={styles.statRingWrap}>
+                      <AdherenceRing percent={s.percent} />
+                    </View>
+                  ) : (
+                    <View style={[styles.statIconWrap, { backgroundColor: s.bg }]}>
+                      <Ionicons name={(s as any).icon} size={18} color={s.color} />
+                    </View>
+                  )}
+                  <Text style={[styles.statValue, { color: s.color }]}>{s.value}</Text>
+                  <Text style={styles.statLabel}>{s.label}</Text>
+                </GlassCard>
+              </Animated.View>
+            ))}
+          </View>
+
+          {/* ── Quick Actions ── */}
+          <Text style={styles.sectionLabel}>Quick Actions</Text>
+          <View style={styles.quickRow}>
+            {[
+              { label: 'Log Dose', icon: 'add-circle-outline' as const, color: GlassTheme.colors.primary, bg: GlassTheme.colors.primaryLight, action: handleLogDose },
+              { label: 'Book Appt', icon: 'calendar-outline' as const, color: GlassTheme.colors.accent, bg: GlassTheme.colors.accentLight, action: () => setEditModal('book') },
+              { label: 'Report', icon: 'bar-chart-outline' as const, color: GlassTheme.colors.violet, bg: GlassTheme.colors.violetLight, action: handleReport },
+            ].map((item) => (
+              <TouchableOpacity key={item.label} style={styles.quickBtn} onPress={item.action} activeOpacity={0.8}>
+                <View style={[styles.quickIcon, { backgroundColor: item.bg }]}>
+                  <Ionicons name={item.icon} size={20} color={item.color} />
+                </View>
+                <Text style={[styles.quickLabel, { color: item.color }]}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* ── Health Info ── */}
+          <Text style={styles.sectionLabel}>Health Info</Text>
+          <GlassCard style={styles.infoCard}>
+            {[
+              { label: 'Blood Group', value: profile?.bloodGroup ?? '—', icon: 'water-outline' as const },
+              { label: 'Allergies', value: profile?.allergies ?? 'None', icon: 'alert-circle-outline' as const },
+              { label: 'Conditions', value: profile?.conditions ?? 'None', icon: 'heart-outline' as const },
+            ].map((item, i, arr) => (
+              <View key={item.label}>
+                <View style={styles.infoRow}>
+                  <Ionicons name={item.icon} size={16} color={GlassTheme.colors.textDim} />
+                  <Text style={styles.infoLabel}>{item.label}</Text>
+                  <Text style={styles.infoValue} numberOfLines={1}>{item.value}</Text>
+                </View>
+                {i < arr.length - 1 && <View style={styles.divider} />}
+              </View>
+            ))}
+            <View style={{ marginTop: 12 }}>
+              <GlassButton
+                label="Edit Health Info"
+                variant="outline"
+                size="sm"
+                onPress={() => {
+                  setForm({ bloodGroup: profile?.bloodGroup ?? '', allergies: profile?.allergies ?? '', conditions: profile?.conditions ?? '' });
+                  setEditModal('health');
+                }}
+              />
+            </View>
+          </GlassCard>
+
+          {/* ── Appointments ── */}
+          {appointments.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>Upcoming Appointments</Text>
+              {appointments.map((a) => (
+                <GlassCard key={a.id} style={styles.apptCard}>
+                  <View style={styles.apptIconWrap}>
+                    <Ionicons name="calendar" size={20} color={GlassTheme.colors.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.apptName}>{a.professionalName}</Text>
+                    <Text style={styles.apptMeta}>{a.specialty} · {a.appointmentDate} at {a.appointmentTime}</Text>
+                  </View>
+                </GlassCard>
+              ))}
+            </>
+          )}
+
+          {/* ── Settings ── */}
+          <Text style={styles.sectionLabel}>Settings</Text>
+          <GlassCard style={{ paddingHorizontal: 0, paddingVertical: 0, overflow: 'hidden' }}>
+            {settingsItems.map((item, i, arr) => (
+              <View key={item.label}>
+                <Pressable
+                  style={({ pressed }) => [styles.settingsRow, pressed && styles.settingsRowPressed]}
+                  onPress={item.action}
+                >
+                  <View style={[styles.settingsIcon, item.danger && { backgroundColor: GlassTheme.colors.dangerLight }]}>
+                    <Ionicons name={item.icon} size={17} color={item.danger ? GlassTheme.colors.danger : GlassTheme.colors.primary} />
+                  </View>
+                  <Text style={[styles.settingsLabel, item.danger && { color: GlassTheme.colors.danger }]}>
+                    {item.label}
+                  </Text>
+                  {!item.danger && <Ionicons name="chevron-forward" size={15} color={GlassTheme.colors.textDim} />}
+                </Pressable>
+                {i < arr.length - 1 && <View style={styles.settingsDivider} />}
+              </View>
+            ))}
+          </GlassCard>
+
+          <Text style={styles.footer}>PharmaLink v1.0.0</Text>
+        </ScrollView>
+
+        {/* ── Edit Modal ── */}
+        <Modal visible={!!editModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>
+                {editModal === 'profile' ? 'Edit Profile'
+                  : editModal === 'health' ? 'Health Info'
+                  : editModal === 'book' ? 'Book Appointment'
+                  : editModal === 'notifications' ? 'Notifications'
+                  : editModal === 'privacy' ? 'Privacy & Security'
+                  : 'Adherence Report'}
+              </Text>
+              <View style={{ gap: 12 }}>
+                {editModal === 'profile' && (
+                  <>
+                    <GlassInput label="Full Name" icon="person-outline" placeholder="Your name" value={form.fullName} onChangeText={(t) => setForm({ ...form, fullName: t })} />
+                    <GlassInput label="Phone" icon="call-outline" placeholder="Phone number" value={form.phone} onChangeText={(t) => setForm({ ...form, phone: t })} keyboardType="phone-pad" />
+                  </>
+                )}
+                {editModal === 'health' && (
+                  <>
+                    <GlassInput label="Blood Group" icon="water-outline" placeholder="e.g. O+" value={form.bloodGroup} onChangeText={(t) => setForm({ ...form, bloodGroup: t })} />
+                    <GlassInput label="Allergies" icon="alert-circle-outline" placeholder="e.g. Penicillin" value={form.allergies} onChangeText={(t) => setForm({ ...form, allergies: t })} />
+                    <GlassInput label="Conditions" icon="heart-outline" placeholder="e.g. Diabetes" value={form.conditions} onChangeText={(t) => setForm({ ...form, conditions: t })} />
+                  </>
+                )}
+                {editModal === 'book' && (
+                  <>
+                    <GlassInput label="Professional Name" icon="person-outline" placeholder="Dr. / Pharm." value={form.profName} onChangeText={(t) => setForm({ ...form, profName: t })} />
+                    <GlassInput label="Specialty" icon="medkit-outline" placeholder="e.g. Cardiology" value={form.specialty} onChangeText={(t) => setForm({ ...form, specialty: t })} />
+                    <GlassInput label="Date" icon="calendar-outline" placeholder="YYYY-MM-DD" value={form.date} onChangeText={(t) => setForm({ ...form, date: t })} />
+                    <GlassInput label="Time" icon="alarm-outline" placeholder="HH:MM" value={form.time} onChangeText={(t) => setForm({ ...form, time: t })} />
+                  </>
+                )}
+                {editModal === 'notifications' && (
+                  <View style={{ gap: 0 }}>
+                    {[
+                      { key: 'notificationsEnabled', label: 'Dose Reminders', sub: 'Alert when it\'s time to take a dose', icon: 'alarm-outline' },
+                      { key: 'emailNotifications', label: 'Email Notifications', sub: 'Receive updates by email', icon: 'mail-outline' },
+                      { key: 'communityAlerts', label: 'Community Activity', sub: 'New posts in your groups', icon: 'chatbubbles-outline' },
+                      { key: 'appointmentReminders', label: 'Appointment Reminders', sub: 'Reminder 24 hrs before appointments', icon: 'calendar-outline' },
+                    ].map((item, i, arr) => (
+                      <View key={item.key}>
+                        <TouchableOpacity
+                          style={styles.toggleRow}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            if (!user?.userId) return;
+                            updateSettings(user.userId, { [item.key]: !(profile as any)?.[item.key] }).then(loadProfile);
+                          }}
+                        >
+                          <View style={styles.toggleIcon}>
+                            <Ionicons name={item.icon as any} size={16} color={GlassTheme.colors.primary} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.toggleLabel}>{item.label}</Text>
+                            <Text style={styles.toggleSub}>{item.sub}</Text>
+                          </View>
+                          <View style={[styles.togglePill, (profile as any)?.[item.key] && styles.togglePillOn]}>
+                            <View style={[styles.toggleThumb, (profile as any)?.[item.key] && styles.toggleThumbOn]} />
+                          </View>
+                        </TouchableOpacity>
+                        {i < arr.length - 1 && <View style={styles.settingsDivider} />}
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {editModal === 'privacy' && (
+                  <View style={{ gap: 0 }}>
+                    {[
+                      { key: 'privacyMode', label: 'Private Profile', sub: 'Hide your profile from other users', icon: 'eye-off-outline' },
+                      { key: 'shareHealthData', label: 'Share Health Data', sub: 'Allow anonymised data for research', icon: 'analytics-outline' },
+                      { key: 'twoFactorEnabled', label: 'Two-Factor Auth', sub: 'Extra security on login', icon: 'shield-outline' },
+                    ].map((item, i, arr) => (
+                      <View key={item.key}>
+                        <TouchableOpacity
+                          style={styles.toggleRow}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            if (!user?.userId) return;
+                            updateSettings(user.userId, { [item.key]: !(profile as any)?.[item.key] }).then(loadProfile);
+                          }}
+                        >
+                          <View style={styles.toggleIcon}>
+                            <Ionicons name={item.icon as any} size={16} color={GlassTheme.colors.primary} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.toggleLabel}>{item.label}</Text>
+                            <Text style={styles.toggleSub}>{item.sub}</Text>
+                          </View>
+                          <View style={[styles.togglePill, (profile as any)?.[item.key] && styles.togglePillOn]}>
+                            <View style={[styles.toggleThumb, (profile as any)?.[item.key] && styles.toggleThumbOn]} />
+                          </View>
+                        </TouchableOpacity>
+                        {i < arr.length - 1 && <View style={styles.settingsDivider} />}
+                      </View>
+                    ))}
+                    <View style={styles.dangerZone}>
+                      <Text style={styles.dangerTitle}>Danger Zone</Text>
+                      <TouchableOpacity style={styles.dangerBtn} onPress={() => Alert.alert('Delete Account', 'Contact support to delete your account.')}>
+                        <Ionicons name="trash-outline" size={15} color={GlassTheme.colors.danger} />
+                        <Text style={styles.dangerBtnText}>Delete Account</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+                {editModal === 'report' && adherenceReport && (
+                  <View style={{ gap: 12 }}>
+                    <View style={styles.reportBanner}>
+                      <Text style={styles.reportBigNum}>{Math.round(adherenceReport.adherenceRate ?? 0)}%</Text>
+                      <Text style={styles.reportBigLabel}>Adherence Rate</Text>
+                    </View>
+                    {[
+                      { icon: 'flame-outline', label: 'Day Streak', value: `${adherenceReport.dayStreak ?? 0} days`, color: GlassTheme.colors.amber },
+                      { icon: 'checkmark-circle-outline', label: 'Doses Logged', value: String(adherenceReport.totalDosesLogged ?? 0), color: GlassTheme.colors.success },
+                      { icon: 'close-circle-outline', label: 'Doses Missed', value: String(adherenceReport.missedDoses ?? 0), color: GlassTheme.colors.danger },
+                    ].map((item) => (
+                      <View key={item.label} style={styles.reportRow}>
+                        <View style={[styles.reportIcon, { backgroundColor: `${item.color}18` }]}>
+                          <Ionicons name={item.icon as any} size={18} color={item.color} />
+                        </View>
+                        <Text style={styles.reportRowLabel}>{item.label}</Text>
+                        <Text style={[styles.reportRowValue, { color: item.color }]}>{item.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+              <View style={styles.modalActions}>
+                <GlassButton label="Close" variant="ghost" onPress={() => setEditModal(null)} style={{ flex: 1 }} />
+                {(editModal === 'profile' || editModal === 'health' || editModal === 'book') && (
+                  <GlassButton label="Save" onPress={saveEdit} style={{ flex: 1 }} />
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    </GlassBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
-    gap: 20,
-  },
-  sectionBlock: {
-    gap: 10,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    color: colors.muted,
-  },
-  sectionAction: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  headerCard: {
-    backgroundColor: colors.card,
-    borderRadius: 24,
-    paddingVertical: 28,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  avatarWrap: {
-    position: 'relative',
-    marginBottom: 14,
-  },
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarEditBadge: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  initials: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  name: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  email: {
-    marginTop: 4,
-    fontSize: 14,
-    color: colors.muted,
-  },
-  premiumBadge: {
-    marginTop: 12,
-    flexDirection: 'row',
+  scroll: { paddingBottom: 120, gap: 4 },
+
+  profileHeader: {
+    paddingTop: 40,
+    paddingBottom: 36,
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.primarySoft,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  premiumText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  greeting: {
-    marginTop: 10,
-    fontSize: 13,
-    color: colors.muted,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  statCard: {
-    width: '48%',
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  iconBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  statLabel: {
-    fontSize: 13,
-    color: colors.muted,
-  },
-  quickActionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  quickAction: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  quickActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-    textAlign: 'center',
-  },
-  listCard: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
     overflow: 'hidden',
+    position: 'relative',
   },
-  listRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+  headerBubble: {
+    position: 'absolute', top: -50, right: -40,
+    width: 160, height: 160, borderRadius: 80,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  listLabel: {
-    fontSize: 15,
-    color: colors.text,
+  avatarCircle: {
+    width: 84, height: 84, borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 6,
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.4)',
   },
-  listValue: {
-    fontSize: 15,
-    fontWeight: '700',
+  avatarText: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  profileName: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  profileEmail: { fontSize: 13, color: 'rgba(255,255,255,0.75)' },
+  roleBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: GlassTheme.radius.pill, paddingHorizontal: 12, paddingVertical: 5,
+    marginTop: 6,
   },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
+  roleText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+
+  sectionLabel: {
+    fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 24, marginBottom: 12, paddingHorizontal: 20,
   },
-  settingsIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 20 },
+  statCell: { width: '47%', flexGrow: 1 },
+  statCard: { alignItems: 'center', gap: 6, paddingVertical: 18 },
+  statIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  statRingWrap: { marginBottom: 2 },
+  statValue: { fontSize: 22, fontWeight: '800' },
+  statLabel: { fontSize: 12, color: GlassTheme.colors.textMuted, textAlign: 'center' },
+
+  quickRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 20 },
+  quickBtn: { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 16,
+    backgroundColor: '#FFFFFF', borderRadius: GlassTheme.radius.lg,
+    borderWidth: 1, borderColor: GlassTheme.colors.divider,
+    ...GlassTheme.shadow.sm,
   },
-  settingsLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text,
+  quickIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  quickLabel: { fontSize: 11, fontWeight: '700' },
+
+  infoCard: { marginHorizontal: 20, gap: 0, paddingVertical: 4 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13 },
+  infoLabel: { flex: 1, color: GlassTheme.colors.textMuted, fontSize: 14 },
+  infoValue: { color: GlassTheme.colors.text, fontWeight: '600', fontSize: 14, maxWidth: '45%' },
+  divider: { height: 1, backgroundColor: GlassTheme.colors.divider },
+
+  apptCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 20, marginBottom: 8 },
+  apptIconWrap: { width: 42, height: 42, borderRadius: 13, backgroundColor: GlassTheme.colors.accentLight, alignItems: 'center', justifyContent: 'center' },
+  apptName: { color: GlassTheme.colors.text, fontWeight: '600' },
+  apptMeta: { color: GlassTheme.colors.textMuted, fontSize: 12, marginTop: 3 },
+
+  settingsRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, paddingHorizontal: 16 },
+  settingsRowPressed: { backgroundColor: GlassTheme.colors.surfaceAlt },
+  settingsIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  settingsLabel: { flex: 1, color: GlassTheme.colors.text, fontSize: 15, fontWeight: '500' },
+  settingsDivider: { height: 1, backgroundColor: GlassTheme.colors.divider, marginLeft: 64 },
+
+  footer: { textAlign: 'center', color: GlassTheme.colors.textDim, fontSize: 11, marginTop: 24, marginBottom: 8 },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, paddingBottom: 40, gap: 16,
   },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginLeft: 16,
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: GlassTheme.colors.divider, alignSelf: 'center', marginBottom: 4 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.text },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+
+  // ── Toggle rows (Notifications / Privacy) ──
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  toggleIcon: {
+    width: 34, height: 34, borderRadius: 10,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
   },
-  footerText: {
-    textAlign: 'center',
-    fontSize: 12,
-    color: colors.muted,
-    marginTop: 4,
+  toggleLabel: { fontSize: 14, fontWeight: '600', color: GlassTheme.colors.text },
+  toggleSub: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: 2 },
+  togglePill: {
+    width: 44, height: 26, borderRadius: 13,
+    backgroundColor: GlassTheme.colors.divider,
+    justifyContent: 'center', paddingHorizontal: 3,
   },
-  pressed: {
-    opacity: 0.75,
+  togglePillOn: { backgroundColor: GlassTheme.colors.primary },
+  toggleThumb: {
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    ...GlassTheme.shadow.sm,
   },
+  toggleThumbOn: { alignSelf: 'flex-end' },
+
+  // ── Danger zone ──
+  dangerZone: {
+    marginTop: 16, borderTopWidth: 1,
+    borderTopColor: GlassTheme.colors.divider, paddingTop: 16,
+  },
+  dangerTitle: { fontSize: 11, fontWeight: '700', color: GlassTheme.colors.textDim, marginBottom: 10, letterSpacing: 0.8 },
+  dangerBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 10, paddingHorizontal: 14,
+    borderRadius: GlassTheme.radius.md,
+    borderWidth: 1, borderColor: GlassTheme.colors.dangerLight,
+    backgroundColor: GlassTheme.colors.dangerLight,
+  },
+  dangerBtnText: { color: GlassTheme.colors.danger, fontSize: 13, fontWeight: '600' },
+
+  // ── Report modal ──
+  reportBanner: {
+    alignItems: 'center', paddingVertical: 20,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    borderRadius: GlassTheme.radius.lg,
+  },
+  reportBigNum: { fontSize: 48, fontWeight: '800', color: GlassTheme.colors.primary },
+  reportBigLabel: { fontSize: 13, color: GlassTheme.colors.textMuted, fontWeight: '600', marginTop: 4 },
+  reportRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  reportIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  reportRowLabel: { flex: 1, fontSize: 14, color: GlassTheme.colors.textMuted },
+  reportRowValue: { fontSize: 16, fontWeight: '800' },
 });

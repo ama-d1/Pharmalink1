@@ -20,7 +20,16 @@ public class Message {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Enumerated(EnumType.STRING)
+    private MessageType messageType = MessageType.TEXT;
+
+    private String mediaUrl;
+
     private LocalDateTime sentAt = LocalDateTime.now();
+
+    public enum MessageType {
+        TEXT, AUDIO, VIDEO
+    }
 
     private boolean isRead = false;
 
@@ -37,6 +46,12 @@ public class Message {
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+
+    public MessageType getMessageType() { return messageType; }
+    public void setMessageType(MessageType messageType) { this.messageType = messageType; }
+
+    public String getMediaUrl() { return mediaUrl; }
+    public void setMediaUrl(String mediaUrl) { this.mediaUrl = mediaUrl; }
 
     public LocalDateTime getSentAt() { return sentAt; }
     public void setSentAt(LocalDateTime sentAt) { this.sentAt = sentAt; }

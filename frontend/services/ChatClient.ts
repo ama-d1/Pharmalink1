@@ -1,16 +1,19 @@
 import { Client, IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { API } from '@/constants/api';
 
 export interface ChatMessage {
   id: string;
   conversationId: string;
   senderId: string;
   content: string;
+  messageType?: 'TEXT' | 'AUDIO' | 'VIDEO';
+  mediaUrl?: string;
   sentAt: string;
   read: boolean;
 }
 
-const BASE_URL = 'http://10.132.83.9:8080';
+const BASE_URL = API.auth.replace('/api/auth', '');
 
 let stompClient: Client | null = null;
 
@@ -56,7 +59,7 @@ export async function sendMessage(
   const res = await fetch(`${BASE_URL}/api/chat/message/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId, senderId, content }),
+    body: JSON.stringify({ conversationId, senderId, content, messageType: 'TEXT' }),
   });
   return res.json();
 }
@@ -68,5 +71,27 @@ export async function getMessages(conversationId: string): Promise<ChatMessage[]
 
 export async function getConversationsForUser(userId: string): Promise<any[]> {
   const res = await fetch(`${BASE_URL}/api/chat/conversations/${userId}`);
+  return res.json();
+}
+
+export async function searchPharmacists(query: string, pharmacyId?: string) {
+  const params = new URLSearchParams({ q: query });
+  if (pharmacyId) params.append('pharmacyId', pharmacyId);
+  const res = await fetch(`${BASE_URL}/api/chat/pharmacists/search?${params}`);
+  return res.json();
+}
+
+export async function sendMediaMessage(
+  conversationId: string,
+  senderId: string,
+  content: string,
+  messageType: 'TEXT' | 'AUDIO' | 'VIDEO',
+  mediaUrl?: string
+): Promise<ChatMessage> {
+  const res = await fetch(`${BASE_URL}/api/chat/message/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversationId, senderId, content, messageType, mediaUrl }),
+  });
   return res.json();
 }
