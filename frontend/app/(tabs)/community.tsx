@@ -1,454 +1,187 @@
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { GlassBackground } from '@/components/glass/GlassBackground';
+import { GlassCard } from '@/components/glass/GlassCard';
+import { GlassTheme } from '@/constants/glassTheme';
+import { useAuth } from '@/context/AuthContext';
+import { Community, getCommunities, joinCommunity } from '@/services/communityService';
+
+const iconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+  heart: 'heart',
+  'happy-outline': 'happy-outline',
+  fitness: 'fitness',
+  ribbon: 'ribbon',
+  water: 'water',
+};
 
 export default function CommunityScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const [communities, setCommunities] = useState<Community[]>([]);
+
+  useEffect(() => {
+    getCommunities(user?.userId).then(setCommunities).catch(() => {});
+  }, [user?.userId]);
+
+  const handleJoin = async (community: Community) => {
+    if (!user?.userId) return Alert.alert('Login Required', 'Please log in to join communities.');
+    await joinCommunity(community.id, user.userId);
+    router.push({ pathname: '/community/[id]' as any, params: { id: community.id, name: community.name, memberCount: String(community.memberCount) } });
+  };
+
+  const totalMembers = communities.reduce((s, c) => s + c.memberCount, 0);
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+    <GlassBackground>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-      {/* HEADER */}
-      <View
-        style={{
-          backgroundColor: '#2563EB',
-          padding: 24,
-          paddingTop: 60,
-          borderBottomLeftRadius: 30,
-          borderBottomRightRadius: 30,
-        }}
-      >
-        <Text
-          style={{
-            color: '#FFFFFF',
-            fontSize: 24,
-            fontWeight: 'bold',
-          }}
-        >
-          Community
-        </Text>
-
-        <Text
-          style={{
-            color: '#E0F2FE',
-            fontSize: 13,
-            marginTop: 4,
-          }}
-        >
-          Join a health group today
-        </Text>
-      </View>
-
-      {/* INFO CARD */}
-      <View
-        style={{
-          backgroundColor: '#FFFFFF',
-          margin: 20,
-          padding: 16,
-          borderRadius: 16,
-          borderWidth: 1,
-          borderColor: '#E5E7EB',
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 14,
-            color: '#6B7280',
-            lineHeight: 20,
-          }}
-        >
-          Connect with people who share similar health experiences and learn
-          from verified pharmacists.
-        </Text>
-      </View>
-
-      {/* COMMUNITIES LIST */}
-      <View style={{ paddingHorizontal: 20 }}>
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: 'bold',
-            color: '#111827',
-            marginBottom: 16,
-          }}
-        >
-          Popular Groups
-        </Text>
-
-        {/* GROUP 1 */}
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 16,
-            marginBottom: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#2563EB',
-              borderRadius: 16,
-              width: 54,
-              height: 54,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 14,
-            }}
-          >
-            <Ionicons name="heart" size={28} color="#FFFFFF" />
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontWeight: 'bold',
-                color: '#111827',
-                fontSize: 15,
-              }}
+          {/* ── Header ── */}
+          <Animated.View entering={FadeInDown.duration(400)}>
+            <LinearGradient
+              colors={GlassTheme.gradients.headerBg}
+              style={styles.header}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
             >
-              Diabetes Support
-            </Text>
+              <View style={styles.headerBubble1} />
+              <View style={styles.headerBubble2} />
+              <View style={{ zIndex: 1, alignItems: 'flex-start', width: '100%' }}>
+                <Text style={styles.title}>Community</Text>
+                <Text style={styles.subtitle}>Connect · Learn · Support</Text>
+                <View style={styles.membersBadge}>
+                  <Ionicons name="people" size={13} color="#FFFFFF" />
+                  <Text style={styles.membersText}>{totalMembers.toLocaleString()} members across all groups</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </Animated.View>
 
-            <Text
-              style={{
-                color: '#6B7280',
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              1,240 members · 5 posts today
-            </Text>
-          </View>
+          {/* ── Info Card ── */}
+          <GlassCard gradient style={styles.infoCard}>
+            <View style={styles.infoRow}>
+              <View style={styles.infoIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={20} color={GlassTheme.colors.primary} />
+              </View>
+              <Text style={styles.infoText}>
+                Peer-support groups moderated by verified pharmacists. Share experiences, ask questions, stay informed.
+              </Text>
+            </View>
+          </GlassCard>
 
-          <View
-            style={{
-              backgroundColor: '#DBEAFE',
-              borderRadius: 20,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: '#2563EB',
-                fontSize: 12,
-                fontWeight: 'bold',
-              }}
-            >
-              Join
-            </Text>
-          </View>
-        </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Popular Groups</Text>
 
-        {/* GROUP 2 */}
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 16,
-            marginBottom: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#8B5CF6',
-              borderRadius: 16,
-              width: 54,
-              height: 54,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 14,
-            }}
-          >
-            <Ionicons name="happy-outline" size={28} color="#FFFFFF" />
-          </View>
+          {communities.map((group, index) => (
+            <Animated.View key={group.id} entering={FadeInDown.delay(80 + index * 60).duration(400)}>
+              <GlassCard onPress={() => handleJoin(group)} style={styles.groupCard}>
+                {/* colour accent strip */}
+                <View style={[styles.accentStrip, { backgroundColor: group.color }]} />
 
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontWeight: 'bold',
-                color: '#111827',
-                fontSize: 15,
-              }}
-            >
-              Mental Health
-            </Text>
+                <View style={[styles.groupIcon, { backgroundColor: `${group.color}18` }]}>
+                  <Ionicons name={iconMap[group.icon] ?? 'people'} size={24} color={group.color} />
+                </View>
 
-            <Text
-              style={{
-                color: '#6B7280',
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              3,891 members · 12 posts today
-            </Text>
-          </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.groupName}>{group.name}</Text>
+                  <View style={styles.groupMeta}>
+                    <Ionicons name="people-outline" size={12} color={GlassTheme.colors.textDim} />
+                    <Text style={styles.groupMetaText}>{group.memberCount.toLocaleString()} members</Text>
+                    <View style={styles.dot} />
+                    <Text style={styles.groupMetaText}>{group.postsToday} posts today</Text>
+                  </View>
+                </View>
 
-          <View
-            style={{
-              backgroundColor: '#EDE9FE',
-              borderRadius: 20,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: '#8B5CF6',
-                fontSize: 12,
-                fontWeight: 'bold',
-              }}
-            >
-              Join
-            </Text>
-          </View>
-        </TouchableOpacity>
+                <View style={[styles.joinBadge, { backgroundColor: group.joined ? GlassTheme.colors.successLight : `${group.color}18`, borderColor: group.joined ? GlassTheme.colors.success : group.color }]}>
+                  <Text style={[styles.joinText, { color: group.joined ? GlassTheme.colors.success : group.color }]}>
+                    {group.joined ? '✓ Joined' : 'Join'}
+                  </Text>
+                </View>
+              </GlassCard>
+            </Animated.View>
+          ))}
 
-        {/* GROUP 3 */}
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 16,
-            marginBottom: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#14B8A6',
-              borderRadius: 16,
-              width: 54,
-              height: 54,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 14,
-            }}
-          >
-            <Ionicons name="fitness" size={28} color="#FFFFFF" />
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontWeight: 'bold',
-                color: '#111827',
-                fontSize: 15,
-              }}
-            >
-              Hypertension Care
-            </Text>
-
-            <Text
-              style={{
-                color: '#6B7280',
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              2,105 members · 8 posts today
-            </Text>
-          </View>
-
-          <View
-            style={{
-              backgroundColor: '#CCFBF1',
-              borderRadius: 20,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: '#14B8A6',
-                fontSize: 12,
-                fontWeight: 'bold',
-              }}
-            >
-              Join
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* GROUP 4 */}
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 16,
-            marginBottom: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#F59E0B',
-              borderRadius: 16,
-              width: 54,
-              height: 54,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 14,
-            }}
-          >
-            <Ionicons name="ribbon" size={28} color="#FFFFFF" />
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontWeight: 'bold',
-                color: '#111827',
-                fontSize: 15,
-              }}
-            >
-              Cancer Survivors
-            </Text>
-
-            <Text
-              style={{
-                color: '#6B7280',
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              987 members · 3 posts today
-            </Text>
-          </View>
-
-          <View
-            style={{
-              backgroundColor: '#FEF3C7',
-              borderRadius: 20,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: '#F59E0B',
-                fontSize: 12,
-                fontWeight: 'bold',
-              }}
-            >
-              Join
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* GROUP 5 */}
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 16,
-            marginBottom: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#DC2626',
-              borderRadius: 16,
-              width: 54,
-              height: 54,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 14,
-            }}
-          >
-            <Ionicons name="water" size={28} color="#FFFFFF" />
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontWeight: 'bold',
-                color: '#111827',
-                fontSize: 15,
-              }}
-            >
-              Sickle Cell Warriors
-            </Text>
-
-            <Text
-              style={{
-                color: '#6B7280',
-                fontSize: 12,
-                marginTop: 2,
-              }}
-            >
-              1,456 members · 6 posts today
-            </Text>
-          </View>
-
-          <View
-            style={{
-              backgroundColor: '#FEE2E2',
-              borderRadius: 20,
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-            }}
-          >
-            <Text
-              style={{
-                color: '#DC2626',
-                fontSize: 12,
-                fontWeight: 'bold',
-              }}
-            >
-              Join
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* CREATE COMMUNITY BUTTON */}
-      <View style={{ paddingHorizontal: 20, paddingBottom: 30 }}>
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#2563EB',
-            borderRadius: 16,
-            padding: 18,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons
-            name="add-circle-outline"
-            size={22}
-            color="#FFFFFF"
-          />
-
-          <Text
-            style={{
-              color: '#FFFFFF',
-              fontWeight: 'bold',
-              fontSize: 15,
-              marginLeft: 8,
-            }}
-          >
-            Create a Community
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-    </ScrollView>
+        </ScrollView>
+      </SafeAreaView>
+    </GlassBackground>
   );
 }
+
+const styles = StyleSheet.create({
+  scroll: { paddingBottom: 120, gap: 4 },
+
+  header: {
+    paddingTop: 24,
+    paddingBottom: 28,
+    paddingHorizontal: 20,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 4,
+  },
+  headerBubble1: {
+    position: 'absolute', top: -40, right: -30,
+    width: 130, height: 130, borderRadius: 65,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  headerBubble2: {
+    position: 'absolute', bottom: -50, right: 60,
+    width: 90, height: 90, borderRadius: 45,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  title: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  membersBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: GlassTheme.radius.pill, paddingHorizontal: 12, paddingVertical: 6,
+    alignSelf: 'flex-start', marginTop: 12,
+  },
+  membersText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+
+  infoCard: { marginHorizontal: 20, marginTop: 4 },
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  infoIconWrap: {
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 2,
+  },
+  infoText: { flex: 1, fontSize: 13, color: GlassTheme.colors.textMuted, lineHeight: 20 },
+
+  sectionTitle: {
+    fontSize: 16, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 20, marginBottom: 10, paddingHorizontal: 20,
+  },
+
+  groupCard: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 14, marginHorizontal: 20, marginBottom: 10,
+    paddingLeft: 0, overflow: 'hidden',
+    position: 'relative',
+  },
+  accentStrip: {
+    width: 4, alignSelf: 'stretch', borderRadius: 0,
+    marginRight: 2,
+  },
+  groupIcon: {
+    width: 52, height: 52, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 12,
+  },
+  groupName: { color: GlassTheme.colors.text, fontWeight: '700', fontSize: 15, marginBottom: 4 },
+  groupMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  groupMetaText: { color: GlassTheme.colors.textMuted, fontSize: 12 },
+  dot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: GlassTheme.colors.textDim },
+
+  joinBadge: {
+    borderRadius: GlassTheme.radius.pill, paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1.5,
+    marginRight: 16,
+  },
+  joinText: { fontSize: 12, fontWeight: '700' },
+});
