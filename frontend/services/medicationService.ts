@@ -1,4 +1,6 @@
-const BASE_URL = 'http://10.132.83.9:8082/api/medications';
+import { API } from '@/constants/api';
+
+const BASE_URL = API.medications;
 
 export const addMedication = async (
   userId: string,

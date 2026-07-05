@@ -1,170 +1,303 @@
-import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getActiveMedicationCount, getPendingMedications } from '../../services/medicationService';
-
-const DEMO_USER_ID = '0962a902-bb84-486e-bd9f-d01120045b05';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { GlassBackground } from '@/components/glass/GlassBackground';
+import { GlassCard } from '@/components/glass/GlassCard';
+import { GlassTheme } from '@/constants/glassTheme';
+import { useAuth } from '@/context/AuthContext';
+import { useGreeting } from '@/hooks/useGreeting';
+import { useHealthTip } from '@/hooks/useHealthTip';
+import { getActiveMedicationCount, getPendingMedications } from '@/services/medicationService';
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const { user, getFirstName } = useAuth();
+  const greeting = useGreeting();
+  const healthTip = useHealthTip();
   const [medicationCount, setMedicationCount] = useState(0);
-  const [reminders, setReminders] = useState([]);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    fetchHomeData();
-  }, []);
+  const userId = user?.userId;
 
-  const fetchHomeData = async () => {
+  const fetchHomeData = useCallback(async () => {
+    if (!userId) return;
     try {
-      const count = await getActiveMedicationCount(DEMO_USER_ID);
-      setMedicationCount(count);
-      const meds = await getPendingMedications(DEMO_USER_ID);
+      const count = await getActiveMedicationCount(userId);
+      setMedicationCount(typeof count === 'number' ? count : 0);
+      const meds = await getPendingMedications(userId);
       setReminders(meds.slice(0, 3));
-    } catch (error) {
-      console.log('Could not load home data');
-    }
+    } catch { /* offline */ }
+  }, [userId]);
+
+  useEffect(() => { fetchHomeData(); }, [fetchHomeData]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchHomeData();
+    setRefreshing(false);
   };
 
+  const actions = [
+    { id: 'order', label: 'Order Meds', icon: 'cart-outline' as const, color: GlassTheme.colors.primary, bg: GlassTheme.colors.primaryLight, route: '/order' },
+    { id: 'pharmacy', label: 'Find Pharmacy', icon: 'location-outline' as const, color: GlassTheme.colors.amber, bg: GlassTheme.colors.amberLight, route: '/pharmacy' },
+  ];
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
-
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Good morning 👋</Text>
-          <Text style={styles.name}>Ama Dansoa</Text>
-        </View>
-        <TouchableOpacity style={styles.notifBtn}>
-          <Ionicons name="notifications-outline" size={22} color="#2563EB" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Medication Card */}
-      <View style={styles.medCard}>
-        <View>
-          <Text style={styles.medCardLabel}>Today's Medications</Text>
-          <Text style={styles.medCardValue}>{medicationCount} doses</Text>
-          <View style={styles.medCardBadge}>
-            <Text style={styles.medCardBadgeText}>Next in 2 hours</Text>
-          </View>
-        </View>
-        <Ionicons name="medkit" size={55} color="rgba(255,255,255,0.15)" />
-      </View>
-
-      {/* Quick Actions */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionsRow}>
-
-          <TouchableOpacity style={styles.actionItem}>
-            <View style={[styles.actionIcon, { backgroundColor: '#2563EB' }]}>
-              <Ionicons name="cart-outline" size={24} color="#fff" />
+    <GlassBackground>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={GlassTheme.colors.primary}
+              colors={[GlassTheme.colors.primary]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Top Header ── */}
+          <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.greeting}>{greeting} 👋</Text>
+              <Text style={styles.name}>{getFirstName()}</Text>
             </View>
-            <Text style={styles.actionLabel}>Order</Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.notifBtn}>
+              <Ionicons name="notifications-outline" size={22} color={GlassTheme.colors.primary} />
+              <View style={styles.notifDot} />
+            </TouchableOpacity>
+          </Animated.View>
 
-          <TouchableOpacity style={styles.actionItem}>
-            <View style={[styles.actionIcon, { backgroundColor: '#14B8A6' }]}>
-              <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-            </View>
-            <Text style={styles.actionLabel}>Chat</Text>
-          </TouchableOpacity>
+          {/* ── Hero Banner ── */}
+          <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+            <LinearGradient
+              colors={GlassTheme.gradients.headerBg}
+              style={styles.heroBanner}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              {/* decorative circles */}
+              <View style={styles.heroBubble1} />
+              <View style={styles.heroBubble2} />
 
-          <TouchableOpacity style={styles.actionItem}>
-            <View style={[styles.actionIcon, { backgroundColor: '#F59E0B' }]}>
-              <Ionicons name="location-outline" size={24} color="#fff" />
-            </View>
-            <Text style={styles.actionLabel}>Pharmacy</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionItem}>
-            <View style={[styles.actionIcon, { backgroundColor: '#8B5CF6' }]}>
-              <Ionicons name="people-outline" size={24} color="#fff" />
-            </View>
-            <Text style={styles.actionLabel}>Community</Text>
-          </TouchableOpacity>
-
-        </View>
-      </View>
-
-      {/* Reminders */}
-      <View style={styles.section}>
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Upcoming Reminders</Text>
-          <TouchableOpacity>
-            <Text style={styles.seeAll}>See all</Text>
-          </TouchableOpacity>
-        </View>
-
-        {reminders.length === 0 ? (
-          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' }}>
-            <Text style={{ color: '#6B7280', fontSize: 14 }}>No upcoming reminders</Text>
-          </View>
-        ) : (
-          reminders.map((med: any, index: number) => (
-            <View key={med.id} style={styles.reminderCard}>
-              <View style={[styles.reminderIcon, { backgroundColor: index === 0 ? '#DBEAFE' : index === 1 ? '#FEF3C7' : '#EDE9FE' }]}>
-                <Ionicons
-                  name="time-outline"
-                  size={20}
-                  color={index === 0 ? '#2563EB' : index === 1 ? '#F59E0B' : '#8B5CF6'}
-                />
+              <View style={{ flex: 1, zIndex: 1 }}>
+                <Text style={styles.heroLabel}>Today's Medications</Text>
+                <Text style={styles.heroValue}>{medicationCount}</Text>
+                <Text style={styles.heroUnit}>doses scheduled</Text>
+                <View style={styles.heroBadge}>
+                  <Ionicons name="checkmark-circle" size={13} color="#FFFFFF" />
+                  <Text style={styles.heroBadgeText}>Stay on track</Text>
+                </View>
               </View>
-              <View style={styles.reminderInfo}>
-                <Text style={styles.reminderName}>{med.name} {med.dosage}</Text>
-                <Text style={styles.reminderTime}>{med.reminderTime} · {med.frequency}</Text>
+
+              <View style={styles.heroIconWrap}>
+                <Ionicons name="medkit" size={52} color="rgba(255,255,255,0.35)" />
               </View>
-              <View style={[styles.reminderBadge, { backgroundColor: med.doseStatus === 'PENDING' ? '#CCFBF1' : '#FEF3C7' }]}>
-                <Text style={[styles.reminderBadgeText, { color: med.doseStatus === 'PENDING' ? '#14B8A6' : '#F59E0B' }]}>
-                  {med.doseStatus === 'PENDING' ? 'Upcoming' : 'Later'}
-                </Text>
-              </View>
+            </LinearGradient>
+          </Animated.View>
+
+          {/* ── Quick Actions ── */}
+          <Animated.View entering={FadeInDown.delay(160).duration(400)}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.actionsRow}>
+              {actions.map((action) => (
+                <TouchableOpacity
+                  key={action.id}
+                  style={[styles.actionCard, { borderColor: `${action.color}30` }]}
+                  onPress={() => router.push(action.route as any)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.actionIcon, { backgroundColor: action.bg }]}>
+                    <Ionicons name={action.icon} size={24} color={action.color} />
+                  </View>
+                  <Text style={[styles.actionLabel, { color: action.color }]}>{action.label}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={action.color} style={{ marginTop: 2 }} />
+                </TouchableOpacity>
+              ))}
             </View>
-          ))
-        )}
-      </View>
+          </Animated.View>
 
-      {/* Health Tip */}
-      <View style={styles.section}>
-        <View style={styles.tipCard}>
-          <Text style={styles.tipLabel}>💡 Health Tip of the Day</Text>
-          <Text style={styles.tipText}>
-            Drink at least 8 glasses of water daily to help your medications
-            work effectively and reduce side effects.
-          </Text>
-        </View>
-      </View>
+          {/* ── Upcoming Reminders ── */}
+          <Animated.View entering={FadeInDown.delay(240).duration(400)}>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Upcoming Reminders</Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/medications')}>
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            </View>
 
-    </ScrollView>
+            {reminders.length === 0 ? (
+              <GlassCard variant="flat">
+                <View style={styles.emptyState}>
+                  <Ionicons name="alarm-outline" size={32} color={GlassTheme.colors.textDim} />
+                  <Text style={styles.emptyText}>No upcoming reminders</Text>
+                  <Text style={styles.emptyHint}>Add medications to get started</Text>
+                </View>
+              </GlassCard>
+            ) : (
+              reminders.map((med: any, index: number) => (
+                <GlassCard key={med.id} style={styles.reminderCard}>
+                  <View style={[styles.reminderDot, { backgroundColor: index === 0 ? GlassTheme.colors.primary : index === 1 ? GlassTheme.colors.accent : GlassTheme.colors.violet }]} />
+                  <View style={[styles.reminderIconWrap, { backgroundColor: GlassTheme.colors.primaryLight }]}>
+                    <Ionicons name="time-outline" size={18} color={GlassTheme.colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.reminderName}>{med.name} {med.dosage}</Text>
+                    <Text style={styles.reminderTime}>{med.reminderTime} · {med.frequency}</Text>
+                  </View>
+                  <View style={styles.pendingBadge}>
+                    <Text style={styles.pendingText}>Pending</Text>
+                  </View>
+                </GlassCard>
+              ))
+            )}
+          </Animated.View>
+
+          {/* ── Health Tip ── */}
+          <Animated.View entering={FadeInDown.delay(320).duration(400)}>
+            <GlassCard gradient style={styles.tipCard}>
+              <View style={styles.tipHeader}>
+                <View style={styles.tipIconWrap}>
+                  <Ionicons name="bulb-outline" size={18} color={GlassTheme.colors.amber} />
+                </View>
+                <View>
+                  <Text style={styles.tipCategory}>{healthTip.category}</Text>
+                  <Text style={styles.tipTitle}>Health Tip</Text>
+                </View>
+              </View>
+              <Text style={styles.tipText}>{healthTip.content}</Text>
+            </GlassCard>
+          </Animated.View>
+
+        </ScrollView>
+      </SafeAreaView>
+    </GlassBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 16 },
-  greeting: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
-  name: { fontSize: 22, fontWeight: '700', color: '#2563EB', marginTop: 2 },
-  notifBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  medCard: { backgroundColor: '#3B82F6', marginHorizontal: 20, borderRadius: 20, padding: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 4 },
-  medCardLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '500' },
-  medCardValue: { color: '#fff', fontSize: 30, fontWeight: '700', marginTop: 4 },
-  medCardBadge: { backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginTop: 10 },
-  medCardBadgeText: { color: '#15803D', fontSize: 11, fontWeight: '600' },
-  section: { paddingHorizontal: 20, paddingTop: 24 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 14 },
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  seeAll: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
-  actionsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  actionItem: { alignItems: 'center', gap: 8 },
-  actionIcon: { width: 64, height: 64, borderRadius: 18, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
-  actionLabel: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  reminderCard: { backgroundColor: '#fff', borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', gap: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
-  reminderIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  reminderInfo: { flex: 1, gap: 3 },
-  reminderName: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  reminderTime: { fontSize: 12, color: '#6B7280' },
-  reminderBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  reminderBadgeText: { fontSize: 11, fontWeight: '600' },
-  tipCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 32, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
-  tipLabel: { fontSize: 13, fontWeight: '700', color: '#2563EB' },
-  tipText: { fontSize: 13, color: '#374151', lineHeight: 20 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 110, gap: 4 },
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+  greeting: { fontSize: 13, color: GlassTheme.colors.textMuted, fontWeight: '500' },
+  name: { fontSize: 26, fontWeight: '800', color: GlassTheme.colors.text, marginTop: 2 },
+  notifBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  notifDot: {
+    position: 'absolute', top: 10, right: 10,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: GlassTheme.colors.rose,
+    borderWidth: 1.5, borderColor: '#FFFFFF',
+  },
+
+  heroBanner: {
+    borderRadius: GlassTheme.radius.xl,
+    padding: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    overflow: 'hidden',
+    minHeight: 140,
+  },
+  heroBubble1: {
+    position: 'absolute', top: -40, right: -20,
+    width: 120, height: 120, borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  heroBubble2: {
+    position: 'absolute', bottom: -30, right: 60,
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  heroLabel: { fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
+  heroValue: { fontSize: 48, fontWeight: '800', color: '#FFFFFF', lineHeight: 54, marginTop: 4 },
+  heroUnit: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  heroBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: GlassTheme.radius.pill, paddingHorizontal: 10, paddingVertical: 5,
+    alignSelf: 'flex-start', marginTop: 10,
+  },
+  heroBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  heroIconWrap: { marginLeft: 'auto' },
+
+  sectionTitle: {
+    fontSize: 16, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 20, marginBottom: 12,
+  },
+  sectionRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 20, marginBottom: 12,
+  },
+  seeAll: { fontSize: 13, color: GlassTheme.colors.primary, fontWeight: '600' },
+
+  actionsRow: { flexDirection: 'row', gap: 12 },
+  actionCard: {
+    flex: 1, borderRadius: GlassTheme.radius.lg,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    padding: 16,
+    alignItems: 'flex-start',
+    gap: 10,
+    ...GlassTheme.shadow.sm,
+  },
+  actionIcon: {
+    width: 48, height: 48, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  actionLabel: { fontSize: 13, fontWeight: '700', flex: 1 },
+
+  reminderCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginBottom: 8, position: 'relative',
+  },
+  reminderDot: {
+    position: 'absolute', left: 0, top: 0, bottom: 0,
+    width: 3, borderRadius: 3,
+  },
+  reminderIconWrap: {
+    width: 40, height: 40, borderRadius: 13,
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 8,
+  },
+  reminderName: { color: GlassTheme.colors.text, fontWeight: '600', fontSize: 14 },
+  reminderTime: { color: GlassTheme.colors.textMuted, fontSize: 12, marginTop: 2 },
+  pendingBadge: {
+    backgroundColor: GlassTheme.colors.amberLight,
+    borderRadius: GlassTheme.radius.pill, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  pendingText: { color: GlassTheme.colors.amber, fontSize: 10, fontWeight: '700' },
+
+  emptyState: { alignItems: 'center', gap: 6, paddingVertical: 8 },
+  emptyText: { color: GlassTheme.colors.textMuted, fontSize: 14, fontWeight: '600' },
+  emptyHint: { color: GlassTheme.colors.textDim, fontSize: 12 },
+
+  tipCard: { marginTop: 8, marginBottom: 20 },
+  tipHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  tipIconWrap: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: GlassTheme.colors.amberLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tipCategory: { fontSize: 10, fontWeight: '700', color: GlassTheme.colors.amber, textTransform: 'uppercase', letterSpacing: 0.5 },
+  tipTitle: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text },
+  tipText: { fontSize: 14, color: GlassTheme.colors.textMuted, lineHeight: 22 },
 });

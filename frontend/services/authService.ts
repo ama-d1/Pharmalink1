@@ -1,4 +1,6 @@
-const BASE_URL = "http://10.132.83.9:8080/api/auth";
+import { API } from '@/constants/api';
+
+const BASE_URL = API.auth;
 
 export const loginUser = async (email: string, password: string) => {
   try {
