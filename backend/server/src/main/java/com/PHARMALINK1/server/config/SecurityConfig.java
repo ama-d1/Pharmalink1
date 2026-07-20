@@ -23,6 +23,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/chat/**").permitAll()
                 .requestMatchers("/api/home/**").permitAll()
                 .requestMatchers("/api/pharmacies/**").permitAll()
+                .requestMatchers("/api/drugs/**").permitAll()
                 .requestMatchers("/api/orders/**").permitAll()
                 .requestMatchers("/api/community/**").permitAll()
                 .requestMatchers("/api/profile/**").permitAll()

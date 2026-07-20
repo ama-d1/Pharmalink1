@@ -6,8 +6,14 @@ import java.time.LocalTime;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "medications")
+@Table(name = "medications", indexes = {
+    @Index(name = "idx_medication_user",        columnList = "userId"),
+    @Index(name = "idx_medication_user_status",  columnList = "userId, status")
+})
 public class Medication {
+
+    public enum Status     { ACTIVE, INACTIVE, COMPLETED }
+    public enum DoseStatus { PENDING, TAKEN, SNOOZED, MISSED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -27,9 +33,12 @@ public class Medication {
 
     private String instructions;
 
-    @Column(nullable = false)
+    // PostgreSQL maps LocalTime → TIME column. Explicit columnDefinition avoids
+    // Hibernate choosing TIMESTAMP for some dialects.
+    @Column(nullable = false, columnDefinition = "TIME")
     private LocalTime reminderTime;
 
+    // PostgreSQL maps LocalDate → DATE column correctly without extra hints.
     @Column(nullable = false)
     private LocalDate startDate;
 
@@ -40,20 +49,13 @@ public class Medication {
     private Status status = Status.ACTIVE;
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private DoseStatus doseStatus = DoseStatus.PENDING;
 
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
-
-    public enum Status {
-        ACTIVE, INACTIVE, COMPLETED
-    }
-
-    public enum DoseStatus {
-        PENDING, TAKEN, SNOOZED, MISSED
-    }
 
     @PrePersist
     protected void onCreate() {

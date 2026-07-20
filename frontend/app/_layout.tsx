@@ -7,9 +7,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/context/AuthContext';
 import { CartProvider } from '@/context/CartContext';
 
-export const unstable_settings = {
-  anchor: 'login',
-};
+
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();

@@ -4,7 +4,9 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "post_comments")
+@Table(name = "post_comments",
+    indexes = { @Index(name = "idx_comment_post", columnList = "postId") }
+)
 public class PostComment {
 
     @Id
@@ -20,7 +22,13 @@ public class PostComment {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+    }
 
     public PostComment() {}
 
