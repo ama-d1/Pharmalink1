@@ -1,9 +1,10 @@
-export const API_BASE_URL = 'http://10.132.83.9:8080';
+export const API_BASE_URL = 'http://10.17.25.99:8080';
 
 export const API = {
   base: API_BASE_URL,
   auth: `${API_BASE_URL}/api/auth`,
   medications: `${API_BASE_URL}/api/medications`,
+  drugSearch: `${API_BASE_URL}/api/drugs`,
   chat: `${API_BASE_URL}/api/chat`,
   home: `${API_BASE_URL}/api/home`,
   pharmacies: `${API_BASE_URL}/api/pharmacies`,

@@ -44,7 +44,7 @@ public class ProfileService {
         profile.put("medicationCount", medicationRepository.countByUserIdAndStatus(userId, Medication.Status.ACTIVE));
         profile.put("appointmentCount", appointmentRepository.countByUserId(userId));
         profile.put("notificationsEnabled", user.isNotificationsEnabled());
-        profile.put("privacyMode", user.isPrivacyMode());
+        profile.put("privacyMode",          user.isPrivacyMode());
         return profile;
     }
 

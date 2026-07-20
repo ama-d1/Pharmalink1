@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, Modal, ScrollView, StatusBar, StyleSheet, Text,
   TextInput, TouchableOpacity, View,
@@ -13,7 +13,10 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
-import { addMedication, getUserMedications, updateDoseStatus } from '@/services/medicationService';
+import {
+  addMedication, DrugSuggestion, getDrugSuggestions,
+  getUserMedications, updateDoseStatus,
+} from '@/services/medicationService';
 
 const FREQ_OPTIONS = ['Daily', 'Twice daily', 'Three times daily', 'Weekly', 'As needed'];
 
@@ -32,6 +35,32 @@ export default function MedicationsScreen() {
   const [form, setForm] = useState({
     name: '', dosage: '', frequency: 'Daily', reminderTime: '08:00', instructions: '',
   });
+
+  // Drug name autocomplete
+  const [suggestions, setSuggestions] = useState<DrugSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNameChange = (text: string) => {
+    setForm((f) => ({ ...f, name: text }));
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    if (text.length >= 2) {
+      suggestTimer.current = setTimeout(async () => {
+        const results = await getDrugSuggestions(text);
+        setSuggestions(results);
+        setShowSuggestions(results.length > 0);
+      }, 300);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectSuggestion = (s: DrugSuggestion) => {
+    setForm((f) => ({ ...f, name: s.name }));
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
 
   const fetchMedications = useCallback(async () => {
     if (!user?.userId) return;
@@ -319,7 +348,41 @@ export default function MedicationsScreen() {
               <Text style={styles.modalTitle}>Add Medication</Text>
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
                 <View style={{ gap: 14 }}>
-                  <GlassInput label="Medication Name" icon="medical-outline" value={form.name} onChangeText={(t) => setForm({ ...form, name: t })} placeholder="e.g. Metformin" />
+                  {/* Drug name with autocomplete */}
+                  <View>
+                    <GlassInput
+                      label="Medication Name"
+                      icon="medical-outline"
+                      value={form.name}
+                      onChangeText={handleNameChange}
+                      placeholder="e.g. Metformin — start typing to search"
+                      autoCorrect={false}
+                    />
+                    {showSuggestions && (
+                      <View style={styles.suggestionsBox}>
+                        {suggestions.map((s) => (
+                          <TouchableOpacity
+                            key={s.id}
+                            style={styles.suggestionRow}
+                            onPress={() => selectSuggestion(s)}
+                          >
+                            <Ionicons name="medical-outline" size={14} color={GlassTheme.colors.primary} style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.suggestionName}>{s.name}</Text>
+                              {s.genericName && s.genericName !== s.name && (
+                                <Text style={styles.suggestionGeneric}>{s.genericName}</Text>
+                              )}
+                            </View>
+                            <View style={[styles.sourceBadge, s.source === 'openFDA' && styles.sourceBadgeFda]}>
+                              <Text style={[styles.sourceText, s.source === 'openFDA' && styles.sourceTextFda]}>
+                                {s.source === 'openFDA' ? 'FDA' : 'Local'}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                   <GlassInput label="Dosage" icon="fitness-outline" value={form.dosage} onChangeText={(t) => setForm({ ...form, dosage: t })} placeholder="e.g. 500mg" />
                   <GlassInput label="Reminder Time" icon="alarm-outline" value={form.reminderTime} onChangeText={(t) => setForm({ ...form, reminderTime: t })} placeholder="08:00" />
 
@@ -538,4 +601,51 @@ const styles = StyleSheet.create({
   },
   historyMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   historyTime: { fontSize: 11, color: GlassTheme.colors.textDim },
+
+  // ── Drug autocomplete ──
+  suggestionsBox: {
+    marginTop: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: GlassTheme.radius.md,
+    borderWidth: 1.5,
+    borderColor: GlassTheme.colors.divider,
+    overflow: 'hidden',
+    ...GlassTheme.shadow.md,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: GlassTheme.colors.divider,
+  },
+  suggestionName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GlassTheme.colors.text,
+  },
+  suggestionGeneric: {
+    fontSize: 11,
+    color: GlassTheme.colors.textMuted,
+    marginTop: 1,
+  },
+  sourceBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: GlassTheme.radius.pill,
+    backgroundColor: GlassTheme.colors.primaryLight,
+  },
+  sourceBadgeFda: {
+    backgroundColor: GlassTheme.colors.amberLight,
+  },
+  sourceText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: GlassTheme.colors.primary,
+  },
+  sourceTextFda: {
+    color: GlassTheme.colors.amber,
+  },
 });

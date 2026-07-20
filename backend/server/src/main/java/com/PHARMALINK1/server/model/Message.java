@@ -4,8 +4,13 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "messages")
+@Table(name = "messages", indexes = {
+    @Index(name = "idx_message_conversation", columnList = "conversationId"),
+    @Index(name = "idx_message_sender",       columnList = "senderId")
+})
 public class Message {
+
+    public enum MessageType { TEXT, AUDIO, VIDEO }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -25,13 +30,20 @@ public class Message {
 
     private String mediaUrl;
 
-    private LocalDateTime sentAt = LocalDateTime.now();
+    @Column(updatable = false)
+    private LocalDateTime sentAt;
 
-    public enum MessageType {
-        TEXT, AUDIO, VIDEO
+    // Renamed from isRead → readStatus to avoid Hibernate boolean field naming issue.
+    // Hibernate generates column "is_read" for field "isRead", then looks for
+    // setter setRead() not setIsRead(), causing confusion. Explicit @Column name
+    // "read_status" and clear getter/setter removes all ambiguity.
+    @Column(name = "read_status")
+    private boolean readStatus = false;
+
+    @PrePersist
+    protected void onCreate() {
+        sentAt = LocalDateTime.now();
     }
-
-    private boolean isRead = false;
 
     public Message() {}
 
@@ -56,6 +68,6 @@ public class Message {
     public LocalDateTime getSentAt() { return sentAt; }
     public void setSentAt(LocalDateTime sentAt) { this.sentAt = sentAt; }
 
-    public boolean isRead() { return isRead; }
-    public void setRead(boolean read) { isRead = read; }
+    public boolean isReadStatus() { return readStatus; }
+    public void setReadStatus(boolean readStatus) { this.readStatus = readStatus; }
 }

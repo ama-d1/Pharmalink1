@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, Text,
   TouchableOpacity, View,
@@ -17,14 +17,23 @@ import { registerUser } from '@/services/authService';
 
 export default function RegisterScreen() {
   const { setSession } = useAuth();
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // useRef: reading value only on submit, not on every keystroke.
+  // This prevents the parent re-rendering on each character typed,
+  // which was unmounting/remounting TextInput fields and jumping the cursor.
+  const fullNameRef = useRef('');
+  const phoneRef    = useRef('');
+  const emailRef    = useRef('');
+  const passwordRef = useRef('');
+
   const handleRegister = async () => {
-    if (!fullName.trim() || !phone.trim() || !email.trim() || !password.trim()) {
+    const fullName = fullNameRef.current.trim();
+    const phone    = phoneRef.current.trim();
+    const email    = emailRef.current.trim();
+    const password = passwordRef.current;
+
+    if (!fullName || !phone || !email || !password) {
       return Alert.alert('Missing Fields', 'Please fill in all fields.');
     }
     if (password.length < 6) {
@@ -32,22 +41,29 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      const data = await registerUser(fullName.trim(), email.trim(), password, phone.trim());
+      const data = await registerUser(fullName, email, password, phone);
       if (data.token) {
         await setSession({
-          token: data.token,
-          userId: data.userId,
+          token:    data.token,
+          userId:   data.userId,
           fullName: data.fullName,
-          email: data.email,
-          role: data.role,
+          email:    data.email,
+          role:     data.role,
         });
         Alert.alert('Welcome!', 'Your account has been created.');
         router.replace('/(tabs)');
       } else {
         Alert.alert('Registration Failed', data.message || 'Something went wrong.');
       }
-    } catch {
-      Alert.alert('Connection Error', 'Could not reach the server.');
+    }  catch (error: any) {
+  console.log(error);
+  Alert.alert(
+    'Connection Error',
+    JSON.stringify(error?.message || error)
+  );
+  {
+  setLoading(false);
+}
     } finally {
       setLoading(false);
     }
@@ -97,35 +113,36 @@ export default function RegisterScreen() {
                 <GlassInput
                   label="Full name"
                   icon="person-outline"
-                  value={fullName}
-                  onChangeText={setFullName}
+                  onChangeText={(t) => { fullNameRef.current = t; }}
                   placeholder="John Mensah"
                   autoCapitalize="words"
+                  returnKeyType="next"
                 />
                 <GlassInput
                   label="Phone number"
                   icon="call-outline"
-                  value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(t) => { phoneRef.current = t; }}
                   placeholder="+233-XX-XXX-XXXX"
                   keyboardType="phone-pad"
+                  returnKeyType="next"
                 />
                 <GlassInput
                   label="Email address"
                   icon="mail-outline"
-                  value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(t) => { emailRef.current = t; }}
                   placeholder="you@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  returnKeyType="next"
                 />
                 <GlassInput
                   label="Password"
                   icon="lock-closed-outline"
-                  value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(t) => { passwordRef.current = t; }}
                   placeholder="At least 6 characters"
                   secureTextEntry
+                  returnKeyType="done"
+                  onSubmitEditing={handleRegister}
                 />
               </View>
 

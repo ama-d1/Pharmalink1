@@ -4,7 +4,10 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "conversations")
+@Table(name = "conversations", indexes = {
+    @Index(name = "idx_conv_patient",     columnList = "patientId"),
+    @Index(name = "idx_conv_pharmacist",  columnList = "pharmacistId")
+})
 public class Conversation {
 
     @Id
@@ -17,8 +20,16 @@ public class Conversation {
     @Column(nullable = false)
     private String pharmacistId;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
-    private LocalDateTime lastMessageAt = LocalDateTime.now();
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    private LocalDateTime lastMessageAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        lastMessageAt = LocalDateTime.now();
+    }
 
     public Conversation() {}
 

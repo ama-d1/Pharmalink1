@@ -44,14 +44,22 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    // Primitive boolean — avoids NullPointerException when Hibernate writes
+    // a NOT NULL column. Boxed Boolean with @Column(nullable=false) will throw
+    // a ConstraintViolationException if null is ever passed to the setter.
+    @Column(nullable = false)
+    private boolean notificationsEnabled = true;
+
+    @Column(nullable = false)
+    private boolean privacyMode = false;
+
     private String profilePictureUrl;
     private String bloodGroup;
     private String allergies;
     private String conditions;
     private Double adherenceRate = 0.0;
     private Integer dayStreak = 0;
-    private boolean notificationsEnabled = true;
-    private boolean privacyMode = false;
+    
     private String pharmacyId;
     private String pharmacyName;
 
@@ -135,11 +143,7 @@ LocalDateTime resetTokenExpiry
     public Integer getDayStreak() { return dayStreak; }
     public void setDayStreak(Integer dayStreak) { this.dayStreak = dayStreak; }
 
-    public boolean isNotificationsEnabled() { return notificationsEnabled; }
-    public void setNotificationsEnabled(boolean notificationsEnabled) { this.notificationsEnabled = notificationsEnabled; }
-
-    public boolean isPrivacyMode() { return privacyMode; }
-    public void setPrivacyMode(boolean privacyMode) { this.privacyMode = privacyMode; }
+    
 
     public String getPharmacyId() { return pharmacyId; }
     public void setPharmacyId(String pharmacyId) { this.pharmacyId = pharmacyId; }
@@ -156,4 +160,9 @@ LocalDateTime resetTokenExpiry
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+    public boolean isNotificationsEnabled() { return notificationsEnabled; }
+    public void setNotificationsEnabled(boolean notificationsEnabled) { this.notificationsEnabled = notificationsEnabled; }
+
+    public boolean isPrivacyMode() { return privacyMode; }
+    public void setPrivacyMode(boolean privacyMode) { this.privacyMode = privacyMode; }
 }

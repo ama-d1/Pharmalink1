@@ -4,7 +4,6 @@ import com.PHARMALINK1.server.dto.MedicationRequest;
 import com.PHARMALINK1.server.dto.MedicationResponse;
 import com.PHARMALINK1.server.service.MedicationService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,14 +14,16 @@ import java.util.List;
 @CrossOrigin(origins = "*")
 public class MedicationController {
 
-    @Autowired
-    private MedicationService medicationService;
+    private final MedicationService medicationService;
+
+    public MedicationController(MedicationService medicationService) {
+        this.medicationService = medicationService;
+    }
 
     @PostMapping("/add")
     public ResponseEntity<MedicationResponse> addMedication(@Valid @RequestBody MedicationRequest request) {
         try {
-            MedicationResponse response = medicationService.addMedication(request);
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(medicationService.addMedication(request));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new MedicationResponse(e.getMessage()));
         }
@@ -31,8 +32,7 @@ public class MedicationController {
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<MedicationResponse>> getUserMedications(@PathVariable String userId) {
         try {
-            List<MedicationResponse> medications = medicationService.getUserMedications(userId);
-            return ResponseEntity.ok(medications);
+            return ResponseEntity.ok(medicationService.getUserMedications(userId));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
         }
@@ -41,8 +41,7 @@ public class MedicationController {
     @GetMapping("/user/{userId}/active")
     public ResponseEntity<List<MedicationResponse>> getActiveMedications(@PathVariable String userId) {
         try {
-            List<MedicationResponse> medications = medicationService.getActiveMedications(userId);
-            return ResponseEntity.ok(medications);
+            return ResponseEntity.ok(medicationService.getActiveMedications(userId));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
         }
@@ -53,8 +52,11 @@ public class MedicationController {
             @PathVariable String medicationId,
             @RequestParam String status) {
         try {
-            MedicationResponse response = medicationService.updateDoseStatus(medicationId, status);
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(medicationService.updateDoseStatus(medicationId, status));
+        } catch (IllegalArgumentException e) {
+            // Invalid enum value for status
+            return ResponseEntity.badRequest()
+                .body(new MedicationResponse("Invalid status value: " + status));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(new MedicationResponse(e.getMessage()));
         }
@@ -63,8 +65,7 @@ public class MedicationController {
     @GetMapping("/user/{userId}/count")
     public ResponseEntity<Long> countActiveMedications(@PathVariable String userId) {
         try {
-            long count = medicationService.countActiveMedications(userId);
-            return ResponseEntity.ok(count);
+            return ResponseEntity.ok(medicationService.countActiveMedications(userId));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
         }

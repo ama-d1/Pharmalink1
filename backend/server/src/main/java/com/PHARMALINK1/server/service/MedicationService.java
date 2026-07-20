@@ -23,6 +23,7 @@ public class MedicationService {
 
         Medication medication = new Medication();
 
+        medication.setUserId(request.getUserId());   // was missing — caused NOT NULL violation
         medication.setName(request.getName());
         medication.setDosage(request.getDosage());
         medication.setFrequency(request.getFrequency());
