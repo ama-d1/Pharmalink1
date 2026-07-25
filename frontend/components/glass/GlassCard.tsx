@@ -78,18 +78,18 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: GlassTheme.radius.lg,
     backgroundColor: GlassTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: GlassTheme.colors.glassBorder,
+    borderWidth: 0,
     ...GlassTheme.shadow.md,
     overflow: 'hidden',
   },
   elevated: {
     ...GlassTheme.shadow.lg,
-    borderColor: 'transparent',
+    borderWidth: 0,
   },
   flat: {
     shadowOpacity: 0,
     elevation: 0,
+    borderWidth: 1,
     borderColor: GlassTheme.colors.divider,
   },
   outlined: {

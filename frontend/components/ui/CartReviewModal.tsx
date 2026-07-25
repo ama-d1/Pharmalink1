@@ -30,14 +30,17 @@ export function CartReviewModal({
   onClose, 
   deliveryAddress
 }: Props) {
-  const { 
-    getCartItems, 
-    getCartTotal, 
-    getCartItemsCount, 
-    updateQuantity, 
+  const {
+    getCartItems,
+    getCartTotal,
+    getCartItemsCount,
+    updateQuantity,
     removeFromCart,
-    clearCart 
+    clearCart,
+    getCartPharmacy,
   } = useCart();
+
+  const cartPharmacy = getCartPharmacy();
 
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [currentAddress, setCurrentAddress] = useState(deliveryAddress);
@@ -64,13 +67,14 @@ export function CartReviewModal({
     );
   };
 
-  const deliveryFee = 5.00; // Fixed delivery fee
-  const finalTotal = total + deliveryFee;
-
+  // Added 2026-07-23 — checkout now stops at a fulfillment-choice screen
+  // (pickup vs. delivery, which decides the fee) before payment, so this
+  // modal no longer assumes a flat delivery fee or routes straight to
+  // /payment.
   const handleProceedToPayment = () => {
     onClose(); // Close modal first
     router.push({
-      pathname: '/payment',
+      pathname: '/delivery',
       params: { address: currentAddress }
     });
   };
@@ -102,12 +106,18 @@ export function CartReviewModal({
             <GlassCard style={styles.addressCard}>
               <View style={styles.addressHeader}>
                 <Text style={styles.sectionTitle}>Delivery Address</Text>
-                <TouchableOpacity onPress={onChangeAddress} style={styles.changeBtn}>
+                <TouchableOpacity onPress={handleChangeAddress} style={styles.changeBtn}>
                   <Text style={styles.changeBtnText}>Change</Text>
                 </TouchableOpacity>
               </View>
               <Text style={styles.addressText}>{currentAddress}</Text>
             </GlassCard>
+
+            {/* Pharmacy indicator — every item in the cart is guaranteed to
+                be from this one pharmacy (see CartContext) */}
+            {cartPharmacy && (
+              <Text style={styles.pharmacyLabel}>Ordering from {cartPharmacy.pharmacyName}</Text>
+            )}
 
             {/* Cart Items */}
             <Text style={styles.sectionTitle}>Your Medications</Text>
@@ -163,20 +173,13 @@ export function CartReviewModal({
                 <Text style={styles.summaryLabel}>Subtotal ({itemsCount} items)</Text>
                 <Text style={styles.summaryValue}>₵{total.toFixed(2)}</Text>
               </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Delivery Fee</Text>
-                <Text style={styles.summaryValue}>₵{deliveryFee.toFixed(2)}</Text>
-              </View>
-              <View style={[styles.summaryRow, styles.totalRow]}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>₵{finalTotal.toFixed(2)}</Text>
-              </View>
+              <Text style={styles.deliveryNote}>Pickup or delivery fee decided at the next step</Text>
             </GlassCard>
           </ScrollView>
 
           <View style={styles.footer}>
             <GlassButton
-              label={`Proceed to Payment - ₵${finalTotal.toFixed(2)}`}
+              label={`Continue - ₵${total.toFixed(2)}`}
               onPress={handleProceedToPayment}
               size="lg"
             />
@@ -222,7 +225,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: GlassTheme.colors.dangerLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -261,6 +264,12 @@ const styles = StyleSheet.create({
     color: GlassTheme.colors.text,
     fontSize: 18,
     fontWeight: '700',
+    marginBottom: 12,
+  },
+  pharmacyLabel: {
+    color: GlassTheme.colors.primary,
+    fontSize: 13,
+    fontWeight: '600',
     marginBottom: 12,
   },
   
@@ -306,7 +315,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    // FIXED — was 'rgba(255,255,255,0.1)', a leftover from the old
+    // glassmorphic look (translucent white over a frosted/blurred
+    // background). Against this screen's actual flat light background
+    // that's ~invisible instead of a visible divider. GlassTheme.colors
+    // .divider is the same solid gray every other current-style screen
+    // uses for this exact purpose.
+    borderTopColor: GlassTheme.colors.divider,
   },
   quantityControls: {
     flexDirection: 'row',
@@ -316,7 +331,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    // FIXED — same leftover-glassmorphism issue: 'rgba(255,255,255,0.1)'
+    // on a white card is essentially invisible, so these +/- buttons read
+    // as plain unstyled icons with no tappable-looking surface.
+    // primaryLight gives them a real, on-brand, visible background.
+    backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -367,7 +386,7 @@ const styles = StyleSheet.create({
   totalRow: {
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: GlassTheme.colors.divider, // FIXED — same invisible-divider issue as itemFooter above
     marginTop: 4,
   },
   totalLabel: {
@@ -380,7 +399,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
-  
+  deliveryNote: {
+    color: GlassTheme.colors.textDim,
+    fontSize: 11,
+    marginTop: 4,
+  },
+
   footer: {
     position: 'absolute',
     bottom: 0,
@@ -388,7 +412,16 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 20,
     paddingBottom: 40,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    backdropFilter: 'blur(20px)',
+    // FIXED — 'rgba(255,255,255,0.95)' was a glassmorphic-era translucent
+    // panel meant to sit over a blurred background. On today's flat
+    // GlassBackground it just looks like a slightly-off-white smudge with
+    // no real separation from the scroll content behind it. A solid
+    // surface color + a real top border + a soft shadow (matching how
+    // every other current-style screen's sticky footer/header separates
+    // from scrollable content) reads as a proper anchored action bar.
+    backgroundColor: GlassTheme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: GlassTheme.colors.divider,
+    ...GlassTheme.shadow.sm,
   },
 });

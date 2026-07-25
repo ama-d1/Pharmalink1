@@ -14,10 +14,12 @@ import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
 import { registerUser } from '@/services/authService';
+import { getEmailError, getPasswordError } from '@/utils/validation';
 
 export default function RegisterScreen() {
   const { setSession } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({ fullName: '', phone: '', email: '', password: '' });
 
   // useRef: reading value only on submit, not on every keystroke.
   // This prevents the parent re-rendering on each character typed,
@@ -27,18 +29,40 @@ export default function RegisterScreen() {
   const emailRef    = useRef('');
   const passwordRef = useRef('');
 
+  const clearError = (field: keyof typeof errors) => {
+    setErrors((prev) => (prev[field] ? { ...prev, [field]: '' } : prev));
+  };
+
+  const validate = () => {
+    const fullName = fullNameRef.current.trim();
+    const phone    = phoneRef.current.trim();
+    const email    = emailRef.current.trim();
+    const password = passwordRef.current;
+    const phoneDigits = phone.replace(/\D/g, '');
+
+    const next = {
+      fullName: fullName ? '' : 'Full name is required.',
+      phone: !phone
+        ? 'Phone number is required.'
+        : phoneDigits.length < 9
+          ? 'Enter a valid phone number.'
+          : '',
+      email: getEmailError(email),
+      password: getPasswordError(password),
+    };
+
+    setErrors(next);
+    return !next.fullName && !next.phone && !next.email && !next.password;
+  };
+
   const handleRegister = async () => {
+    if (!validate()) return;
+
     const fullName = fullNameRef.current.trim();
     const phone    = phoneRef.current.trim();
     const email    = emailRef.current.trim();
     const password = passwordRef.current;
 
-    if (!fullName || !phone || !email || !password) {
-      return Alert.alert('Missing Fields', 'Please fill in all fields.');
-    }
-    if (password.length < 6) {
-      return Alert.alert('Weak Password', 'Password must be at least 6 characters.');
-    }
     setLoading(true);
     try {
       const data = await registerUser(fullName, email, password, phone);
@@ -55,15 +79,12 @@ export default function RegisterScreen() {
       } else {
         Alert.alert('Registration Failed', data.message || 'Something went wrong.');
       }
-    }  catch (error: any) {
-  console.log(error);
-  Alert.alert(
-    'Connection Error',
-    JSON.stringify(error?.message || error)
-  );
-  {
-  setLoading(false);
-}
+    } catch (err: any) {
+      if (err?.message === 'NETWORK_ERROR') {
+        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      } else {
+        Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
+      }
     } finally {
       setLoading(false);
     }
@@ -113,38 +134,46 @@ export default function RegisterScreen() {
                 <GlassInput
                   label="Full name"
                   icon="person-outline"
-                  onChangeText={(t) => { fullNameRef.current = t; }}
+                  onChangeText={(t) => { fullNameRef.current = t; clearError('fullName'); }}
                   placeholder="John Mensah"
                   autoCapitalize="words"
                   returnKeyType="next"
+                  error={errors.fullName}
                 />
                 <GlassInput
                   label="Phone number"
                   icon="call-outline"
-                  onChangeText={(t) => { phoneRef.current = t; }}
+                  onChangeText={(t) => { phoneRef.current = t; clearError('phone'); }}
                   placeholder="+233-XX-XXX-XXXX"
                   keyboardType="phone-pad"
                   returnKeyType="next"
+                  error={errors.phone}
                 />
                 <GlassInput
                   label="Email address"
                   icon="mail-outline"
-                  onChangeText={(t) => { emailRef.current = t; }}
+                  onChangeText={(t) => { emailRef.current = t; clearError('email'); }}
                   placeholder="you@example.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
                   returnKeyType="next"
+                  error={errors.email}
                 />
                 <GlassInput
                   label="Password"
                   icon="lock-closed-outline"
-                  onChangeText={(t) => { passwordRef.current = t; }}
-                  placeholder="At least 6 characters"
+                  onChangeText={(t) => { passwordRef.current = t; clearError('password'); }}
+                  placeholder="8+ chars, upper, lower, number, symbol"
                   secureTextEntry
                   returnKeyType="done"
                   onSubmitEditing={handleRegister}
+                  error={errors.password}
                 />
               </View>
+
+              <Text style={styles.passwordHint}>
+                Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+              </Text>
 
               <View style={styles.termsRow}>
                 <Ionicons name="shield-checkmark-outline" size={14} color={GlassTheme.colors.success} />
@@ -219,6 +248,7 @@ const styles = StyleSheet.create({
   perkText: { fontSize: 11, color: GlassTheme.colors.primary, fontWeight: '600' },
 
   fields: { gap: 14 },
+  passwordHint: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: -6, lineHeight: 15 },
 
   termsRow: {
     flexDirection: 'row',

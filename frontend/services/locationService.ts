@@ -1,6 +1,9 @@
 import { API } from '@/constants/api';
+import * as Location from 'expo-location';
+import { getAuthHeaders } from '@/utils/authHeaders';
 
-export type Location = {
+
+export type SavedLocation = {
   id: string;
   name: string;
   address: string;
@@ -93,7 +96,9 @@ export const POPULAR_LOCATIONS: LocationSuggestion[] = [
 
 export async function searchLocations(query: string): Promise<LocationSuggestion[]> {
   try {
-    const res = await fetch(`${API.base}/locations/search?q=${encodeURIComponent(query)}`);
+    const res = await fetch(`${API.profile}/locations/search?q=${encodeURIComponent(query)}`, {
+      headers: await getAuthHeaders(),
+    });
     
     if (!res.ok) {
       // Fallback to local search if API fails
@@ -115,63 +120,80 @@ export async function searchLocations(query: string): Promise<LocationSuggestion
   }
 }
 
-export async function getCurrentLocation(): Promise<LocationSuggestion | null> {
-  // This would integrate with expo-location in a real app
-  // For now, return a mock GPS location
+export async function getCurrentLocation() {
+  const { status } = await Location.requestForegroundPermissionsAsync();
+
+  if (status !== 'granted') {
+    throw new Error('Location permission denied');
+  }
+
+  const location = await Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.High,
+  });
+
   return {
-    id: 'gps-current',
-    name: 'Current Location',
-    address: 'Your current location',
-    city: 'Accra',
-    region: 'Greater Accra',
-    type: 'gps'
+    latitude: location.coords.latitude,
+    longitude: location.coords.longitude,
   };
 }
 
 export async function getSavedLocations(userId: string): Promise<LocationSuggestion[]> {
   try {
-    const res = await fetch(`${API.base}/users/${userId}/locations`);
-    
+    const res = await fetch(`${API.profile}/${userId}/locations`, { headers: await getAuthHeaders() });
+
     if (!res.ok) {
       return [];
     }
-    
+
     return res.json();
   } catch (error) {
     return [];
   }
 }
 
-export async function saveLocation(userId: string, location: Omit<Location, 'id'>): Promise<Location> {
-  const res = await fetch(`${API.base}/users/${userId}/locations`, {
+export async function saveLocation(userId: string, location: Omit<SavedLocation, 'id'>): Promise<SavedLocation> {
+  const res = await fetch(`${API.profile}/${userId}/locations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify(location),
   });
-  
+
   if (!res.ok) {
     throw new Error('Failed to save location');
   }
-  
+
   return res.json();
 }
 
 export async function deleteLocation(userId: string, locationId: string): Promise<void> {
-  const res = await fetch(`${API.base}/users/${userId}/locations/${locationId}`, {
+  const res = await fetch(`${API.profile}/${userId}/locations/${locationId}`, {
     method: 'DELETE',
+    headers: await getAuthHeaders(),
   });
-  
+
   if (!res.ok) {
     throw new Error('Failed to delete location');
   }
 }
 
 export async function setDefaultLocation(userId: string, locationId: string): Promise<void> {
-  const res = await fetch(`${API.base}/users/${userId}/locations/${locationId}/default`, {
+  const res = await fetch(`${API.profile}/${userId}/locations/${locationId}/default`, {
     method: 'POST',
+    headers: await getAuthHeaders(),
   });
   
   if (!res.ok) {
     throw new Error('Failed to set default location');
   }
+}
+
+export async function reverseGeocode(latitude: number, longitude: number) {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16`,
+    { headers: { 'User-Agent': 'PharmaLink' } }
+  );
+
+  const data = await response.json();
+
+  return data.display_name;
 }

@@ -75,22 +75,22 @@ export const GlassTheme = {
   },
   shadow: {
     sm: {
-      shadowColor: '#1E3A8A',
-      shadowOpacity: 0.06,
+      shadowColor: '#000000',
+      shadowOpacity: 0.12,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 2 },
       elevation: 2,
     },
     md: {
-      shadowColor: '#1E3A8A',
-      shadowOpacity: 0.09,
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 4 },
       elevation: 4,
     },
     lg: {
-      shadowColor: '#1E3A8A',
-      shadowOpacity: 0.13,
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
       shadowRadius: 28,
       shadowOffset: { width: 0, height: 8 },
       elevation: 8,

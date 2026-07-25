@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Share, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,9 +9,10 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
 import {
-  commentOnPost, CommunityPost, createPost,
+  CommunityPost, createPost,
   getCommunityPosts, joinCommunity, likePost,
 } from '@/services/communityService';
+import { CommentsModal } from '@/components/ui/CommentsModal';
 
 export default function CommunityDetailScreen() {
   const { id, name, memberCount } = useLocalSearchParams<{ id: string; name: string; memberCount: string }>();
@@ -20,6 +21,7 @@ export default function CommunityDetailScreen() {
   const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [content, setContent] = useState('');
   const [focused, setFocused] = useState(false);
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
 
   const loadPosts = () => {
     if (!id) return;
@@ -45,12 +47,22 @@ export default function CommunityDetailScreen() {
   };
 
   const handleComment = (postId: string) => {
-    Alert.prompt('Add Comment', 'Write your comment:', async (text) => {
-      if (text && user?.userId) {
-        await commentOnPost(postId, user.userId, text);
-        loadPosts();
-      }
-    });
+    if (!user?.userId) return Alert.alert('Login Required', 'Please log in to comment.');
+    setCommentsPostId(postId);
+  };
+
+  // MVP scope (deliberately chosen over a deep-link-to-exact-post version,
+  // which would need the app to handle opening straight to a specific post
+  // on cold start — not built): hand off to the OS share sheet with a plain
+  // text summary. No backend changes needed for this.
+  const handleShare = async (post: CommunityPost) => {
+    try {
+      await Share.share({
+        message: `${post.authorName ?? 'Someone'} in ${name ?? 'a PharmaLink community'}:\n\n"${post.content}"\n\n— Shared from PharmaLink`,
+      });
+    } catch {
+      // Share sheet dismissed or failed silently — nothing to recover from.
+    }
   };
 
   return (
@@ -100,8 +112,18 @@ export default function CommunityDetailScreen() {
                   <Text style={styles.postAvatarText}>{item.authorName?.[0]?.toUpperCase() ?? '?'}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.author}>{item.authorName}</Text>
-                  <Text style={styles.postTime}>Community Member</Text>
+                  <View style={styles.authorRow}>
+                    <Text style={styles.author}>{item.authorName}</Text>
+                    {item.isHealthProfessional ? (
+                      <View style={styles.proBadge}>
+                        <Ionicons name="medical" size={10} color={GlassTheme.colors.primary} />
+                        <Text style={styles.proBadgeText}>Health Professional</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.postTime}>
+                    {item.isHealthProfessional ? 'Pharmacist' : 'Community Member'}
+                  </Text>
                 </View>
                 <Ionicons name="ellipsis-horizontal" size={16} color={GlassTheme.colors.textDim} />
               </View>
@@ -123,7 +145,7 @@ export default function CommunityDetailScreen() {
                     {item.commentsCount}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn}>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => handleShare(item)}>
                   <Ionicons name="share-social-outline" size={18} color={GlassTheme.colors.textDim} />
                   <Text style={styles.actionText}>Share</Text>
                 </TouchableOpacity>
@@ -160,6 +182,14 @@ export default function CommunityDetailScreen() {
           </View>
         </View>
       </SafeAreaView>
+
+      <CommentsModal
+        visible={commentsPostId !== null}
+        postId={commentsPostId}
+        userId={user?.userId}
+        onClose={() => setCommentsPostId(null)}
+        onCommentAdded={loadPosts}
+      />
     </GlassBackground>
   );
 }
@@ -194,7 +224,15 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   postAvatarText: { fontSize: 15, fontWeight: '700', color: GlassTheme.colors.primary },
+  authorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   author: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text },
+  proBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    borderRadius: GlassTheme.radius.pill,
+    paddingHorizontal: 7, paddingVertical: 2,
+  },
+  proBadgeText: { fontSize: 10, fontWeight: '700', color: GlassTheme.colors.primary },
   postTime: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: 1 },
   postContent: { fontSize: 14, color: GlassTheme.colors.textMuted, lineHeight: 22 },
   postActions: { flexDirection: 'row', gap: 20, paddingTop: 4, borderTopWidth: 1, borderTopColor: GlassTheme.colors.divider },

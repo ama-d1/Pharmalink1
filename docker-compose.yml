@@ -1,0 +1,327 @@
+# PharmaLink microservices — local/dev orchestration.
+#
+# Architecture decisions this file implements (see MICROSERVICES_PLAN.md §1
+# and the Phase 2 write-up under step 10 for the full reasoning):
+#   - One Postgres container, one database per service (not 11 containers) —
+#     see backend/postgres-init/init-multiple-databases.sh, which the
+#     official postgres image runs automatically on first start.
+#   - Static Docker DNS service discovery — every *_SERVICE_URL below points
+#     at another service's Compose *service name* (e.g. http://auth-service:8081),
+#     which Docker's embedded DNS resolves automatically on the shared
+#     "pharmalink-net" network. No service registry/Eureka/Consul needed.
+#   - Network isolation — every service attaches to "pharmalink-net", but
+#     only api-gateway publishes a port to the host (8080). Every other
+#     service is reachable by name from other containers on that network,
+#     but NOT reachable from the host machine or the internet — "protected"
+#     by not having a published port, not by a firewall rule. This is the
+#     real enforcement of the "/internal/** unreachable from outside"
+#     convention used throughout every service's SecurityConfig comments;
+#     until this file existed, that convention was aspirational (every
+#     service was actually reachable directly on localhost:PORT during local
+#     dev, since nothing was containerized yet).
+#   - pharmalink-net is deliberately NOT marked `internal: true` — auth-service
+#     needs outbound internet access for its Gmail SMTP calls (password
+#     reset emails). Isolation here comes from "no published port", not from
+#     blocking all external routing, which would also break that legitimate
+#     outbound call.
+#
+# Deliberately no YAML anchors/merge keys (`<<:`) here, even though several
+# services share the same env vars (DB_USERNAME/DB_PASSWORD/JWT_SECRET) —
+# merge-key support varies across Compose's YAML parser versions and I had no
+# way to test against a real `docker compose config` in this environment, so
+# explicit repetition was the safer choice over a guess that might silently
+# fail to parse.
+#
+# Usage: copy .env.example to .env, fill in real secrets for anything beyond
+# local dev, then `docker compose up --build`.
+
+networks:
+  pharmalink-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
+services:
+
+  # ── Shared Postgres — one container, one DB per service ──────────────────
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      POSTGRES_DB: postgres
+      POSTGRES_MULTIPLE_DATABASES: >-
+        pharmalink_auth,pharmalink_profile,pharmalink_medication,
+        pharmalink_pharmacy,pharmalink_drugs,pharmalink_orders,
+        pharmalink_chat,pharmalink_community,pharmalink_notifications,
+        pharmalink_delivery,pharmalink_home,pharmalink_payments
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - pharmalink-net
+    # No `ports:` mapping on purpose — see file header. Uncomment below only
+    # for temporary local debugging with a host-side psql/GUI client:
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── auth-service (port 8081) ──────────────────────────────────────────────
+  auth-service:
+    build: ./backend/services/auth-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      JWT_SECRET: ${JWT_SECRET:-pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      MAIL_USERNAME: bebedansoa@gmail.com
+      MAIL_PASSWORD: hjdtwozlwrerrcvk
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+      # First-admin bootstrap (see FirstAdminBootstrap.java) — set this to an
+      # already-registered account's email, then `docker compose restart
+      # auth-service` to promote it to ADMIN. Blank = no-op.
+      FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── user-profile-service (port 8082) ─────────────────────────────────────
+  user-profile-service:
+    build: ./backend/services/user-profile-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      MEDICATION_SERVICE_URL: http://medication-service:8083
+      NOTIFICATION_SERVICE_URL: http://notification-service:8089
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── medication-service (port 8083) ───────────────────────────────────────
+  medication-service:
+    build: ./backend/services/medication-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── pharmacy-service (port 8084) ──────────────────────────────────────────
+  pharmacy-service:
+    build: ./backend/services/pharmacy-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+      # Added 2026-07-24 — this service's own PaystackClient (bank list,
+      # account resolution, subaccount creation) for payment splitting.
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── drug-catalog-service (port 8085) ──────────────────────────────────────
+  drug-catalog-service:
+    build: ./backend/services/drug-catalog-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── order-service (port 8086) ─────────────────────────────────────────────
+  order-service:
+    build: ./backend/services/order-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      DRUG_CATALOG_SERVICE_URL: http://drug-catalog-service:8085
+      NOTIFICATION_SERVICE_URL: http://notification-service:8089
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── chat-service (port 8087) ──────────────────────────────────────────────
+  chat-service:
+    build: ./backend/services/chat-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      JWT_SECRET: ${JWT_SECRET:-pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── community-service (port 8088) ─────────────────────────────────────────
+  community-service:
+    build: ./backend/services/community-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+      NOTIFICATION_SERVICE_URL: http://notification-service:8089
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── notification-service (port 8089) ──────────────────────────────────────
+  notification-service:
+    build: ./backend/services/notification-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      # Coming-soon roadmap item #6: same Gmail account/App Password as
+      # auth-service's password-reset emails (see .env.example) — reused,
+      # not a separate mail setup.
+      MAIL_USERNAME: ${MAIL_USERNAME:-your_email@gmail.com}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-your_app_password}
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── delivery-service (port 8090) ──────────────────────────────────────────
+  delivery-service:
+    build: ./backend/services/delivery-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      ORDER_SERVICE_URL: http://order-service:8086
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── admin-service (port 8091, no database — pure orchestrator) ───────────
+  admin-service:
+    build: ./backend/services/admin-service
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+      PHARMACY_SERVICE_URL: http://pharmacy-service:8084
+      ORDER_SERVICE_URL: http://order-service:8086
+      COMMUNITY_SERVICE_URL: http://community-service:8088
+    depends_on:
+      - auth-service
+      - user-profile-service
+      - pharmacy-service
+      - order-service
+      - community-service
+    networks:
+      - pharmalink-net
+
+  # ── home-service (port 8092) ──────────────────────────────────────────────
+  home-service:
+    build: ./backend/services/home-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      MEDICATION_SERVICE_URL: http://medication-service:8083
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pharmalink-net
+
+  # ── payment-service (port 8093) — real Paystack integration, GHS only ────
+  # Added 2026-07-23 — replaces order-service's old fake processPayment()
+  # flip. See payment-service's PaystackClient/PaymentService javadoc for
+  # why GHS-only (Ghana-registered Paystack merchant account).
+  payment-service:
+    build: ./backend/services/payment-service
+    environment:
+      DB_HOST: postgres
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
+      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY}
+      ORDER_SERVICE_URL: http://order-service:8086
+      # Added 2026-07-24 — resolves a pharmacy's Paystack subaccount code at
+      # checkout so the split (90% pharmacy / 10% platform) can be applied.
+      PHARMACY_SERVICE_URL: http://pharmacy-service:8084
+    depends_on:
+      postgres:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+      pharmacy-service:
+        condition: service_started
+    networks:
+      - pharmalink-net
+
+  # ── api-gateway (port 8080) — the ONLY service exposed to the host ───────
+  api-gateway:
+    build: ./backend/services/api-gateway
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
+      MEDICATION_SERVICE_URL: http://medication-service:8083
+      PHARMACY_SERVICE_URL: http://pharmacy-service:8084
+      DRUG_CATALOG_SERVICE_URL: http://drug-catalog-service:8085
+      ORDER_SERVICE_URL: http://order-service:8086
+      CHAT_SERVICE_URL: http://chat-service:8087
+      CHAT_SERVICE_WS_URL: ws://chat-service:8087
+      COMMUNITY_SERVICE_URL: http://community-service:8088
+      NOTIFICATION_SERVICE_URL: http://notification-service:8089
+      DELIVERY_SERVICE_URL: http://delivery-service:8090
+      ADMIN_SERVICE_URL: http://admin-service:8091
+      HOME_SERVICE_URL: http://home-service:8092
+      PAYMENT_SERVICE_URL: http://payment-service:8093
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - user-profile-service
+      - medication-service
+      - pharmacy-service
+      - drug-catalog-service
+      - order-service
+      - chat-service
+      - community-service
+      - notification-service
+      - delivery-service
+      - admin-service
+      - home-service
+      - payment-service
+    networks:
+      - pharmalink-net

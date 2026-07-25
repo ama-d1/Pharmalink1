@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: user-profile-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_profile
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Phase 2 (MICROSERVICES_PLAN.md sec 6 step 9): Flyway now
+                                     # owns schema creation/changes (see db/migration/V1__init.sql
+                                     # and the flyway block below) -- Hibernate only validates.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # ---- Flyway --------------------------------------------
+  # Baseline (V1__init.sql) was hand-derived from this service's @Entity classes
+  # rather than pg_dump'ed from a live DB -- see the migration file's header
+  # comment and MICROSERVICES_PLAN.md Phase 2 step 9 for that caveat.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+# ── Cross-service calls to medication-service ───────────────────────────────
+# medication-service is now extracted (port 8083) — repointed from the
+# monolith's port 8080. medicationCount, dose-logging, and dose-count are
+# all best-effort where noted in MedicationClient; a failure there must
+# never break getProfile()/updateProfile() as a whole.
+services:
+  medication:
+    base-url: ${MEDICATION_SERVICE_URL:http://localhost:8083}
+  # Coming-soon roadmap item #7: AppointmentReminderScheduler posts to
+  # notification-service's internal endpoint the same way
+  # community-service's NotificationClient does.
+  notification:
+    base-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8089}
+
+server:
+  port: 8082
+  address: 0.0.0.0

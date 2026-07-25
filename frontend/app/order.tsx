@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, TextInput } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
@@ -8,144 +8,97 @@ import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
-import { useAuth } from '@/context/AuthContext';
 import { useCart } from '@/context/CartContext';
 import { CartReviewModal } from '@/components/ui/CartReviewModal';
 import { LocationPickerModal } from '@/components/ui/LocationPickerModal';
-import { createOrder, getAvailableDrugs, processPayment, searchDrugs } from '@/services/orderService';
 import { LocationSuggestion } from '@/services/locationService';
+import { PharmacyPriceComparisonRow, searchAcrossPharmacies } from '@/services/pharmacyStockService';
 
-type Drug = { 
-  id: string; 
-  name: string; 
-  description: string; 
-  price: number; 
-  category?: string;
-  manufacturer?: string;
-  inStock?: boolean;
-  dosage?: string;
-};
-
+// REBUILT 2026-07-23 — this used to be a flat, pharmacy-agnostic drug
+// catalog browser (one global price per medication, no pharmacy attached).
+// Now: search a medication, see every nearby pharmacy that stocks it with
+// its own price (cheapest first), pick whichever works best, then order
+// from that specific pharmacy — like a food delivery app, one order comes
+// from one pharmacy. See pharmacy-service's PharmacyStock entity javadoc
+// (backend) for the full feature context.
 export default function OrderScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { 
-    cart, 
-    addToCart, 
-    removeFromCart, 
-    updateQuantity, 
-    clearCart,
-    getCartTotal, 
+  const {
+    cart,
+    addToCart,
+    replaceCartWithItem,
+    updateQuantity,
+    getCartTotal,
     getCartItemsCount,
-    getCartItems
+    getCartPharmacy,
   } = useCart();
-  
-  const [drugs, setDrugs] = useState<Drug[]>([]);
-  const [filteredDrugs, setFilteredDrugs] = useState<Drug[]>([]);
+
   const [address, setAddress] = useState('East Legon, Accra');
-  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState<PharmacyPriceComparisonRow[]>([]);
+  const [searched, setSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [showCartReview, setShowCartReview] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   const total = getCartTotal();
   const cartItemsCount = getCartItemsCount();
+  const cartPharmacy = getCartPharmacy();
 
-  useEffect(() => {
-    loadDrugs();
-  }, []);
+  const handleSearch = async () => {
+    const query = searchQuery.trim();
+    if (query.length < 2) return;
 
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      handleSearch(searchQuery);
-    } else {
-      setFilteredDrugs(drugs);
-      setIsSearching(false);
-    }
-  }, [searchQuery, drugs]);
-
-  const loadDrugs = async () => {
-    try {
-      const drugsData = await getAvailableDrugs();
-      setDrugs(drugsData);
-      setFilteredDrugs(drugsData);
-    } catch (error) {
-      console.error('Error loading drugs:', error);
-    }
-  };
-
-  const handleSearch = async (query: string) => {
-    if (!query.trim()) return;
-    
     setIsSearching(true);
+    setSearched(true);
     try {
-      const searchResults = await searchDrugs(query);
-      setFilteredDrugs(searchResults);
-    } catch (error) {
-      // Fallback to local filtering if API search fails
-      const filtered = drugs.filter(drug => 
-        drug.name.toLowerCase().includes(query.toLowerCase()) ||
-        drug.description.toLowerCase().includes(query.toLowerCase()) ||
-        drug.category?.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredDrugs(filtered);
+      setResults(await searchAcrossPharmacies(query));
     } finally {
       setIsSearching(false);
     }
   };
 
-  const toggleDrug = (drug: Drug) => {
-    if (cart[drug.id]) {
-      removeFromCart(drug.id);
-    } else {
-      addToCart(drug);
+  const cartQuantityFor = (row: PharmacyPriceComparisonRow) => {
+    const item = cart[row.drugId];
+    return item && item.pharmacyId === row.pharmacyId ? item.quantity : 0;
+  };
+
+  const addRowToCart = (row: PharmacyPriceComparisonRow) => {
+    const drugLike = {
+      id: row.drugId,
+      name: row.drugName,
+      price: row.price,
+      description: `From ${row.pharmacyName}`,
+      inStock: row.quantity > 0,
+    };
+
+    const result = addToCart(drugLike, row.pharmacyId, row.pharmacyName);
+    if (result === 'conflict') {
+      Alert.alert(
+        'Switch pharmacy?',
+        `Your cart has items from ${cartPharmacy?.pharmacyName}. Adding this item will clear your cart and start a new order from ${row.pharmacyName}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Switch', style: 'destructive', onPress: () => replaceCartWithItem(drugLike, row.pharmacyId, row.pharmacyName) },
+        ]
+      );
     }
   };
 
-  const handleOrder = async () => {
-    if (!user?.userId) return Alert.alert('Error', 'Please log in first');
-    const cartItems = getCartItems();
-    if (cartItems.length === 0) return Alert.alert('Cart empty', 'Select at least one drug');
-
-    const items = cartItems.map((item) => ({
-      drugName: item.name,
-      quantity: item.quantity,
-      unitPrice: item.price,
-    }));
-
-    setLoading(true);
-    try {
-      const order = await createOrder(user.userId, items, address, 'Mobile Money');
-      await processPayment(order.id);
-      Alert.alert('Success', 'Order placed & paid! Delivery on the way.', [
-        { text: 'OK', onPress: () => {
-          clearCart();
-          router.back();
-        }},
-      ]);
-    } catch {
-      Alert.alert('Error', 'Could not complete order');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Added 2026-07-23 — checkout now stops at a fulfillment-choice screen
+  // (pickup vs. delivery) BEFORE payment, not a separate step the user is
+  // prompted into after already paying. See delivery.tsx's rewritten
+  // purpose.
   const handleProceedToPayment = () => {
     setShowCartReview(false);
     router.push({
-      pathname: '/payment',
+      pathname: '/delivery',
       params: { address }
     });
   };
 
-  const handleChangeAddress = () => {
-    setShowLocationPicker(true);
-  };
-
-  const handleLocationSelect = (location: LocationSuggestion) => {
-    setAddress(location.address);
-  };
+  const handleChangeAddress = () => setShowLocationPicker(true);
+  const handleLocationSelect = (location: LocationSuggestion) => setAddress(location.address);
 
   return (
     <GlassBackground>
@@ -156,8 +109,8 @@ export default function OrderScreen() {
           </TouchableOpacity>
           <Text style={styles.title}>Order Medication</Text>
           {cartItemsCount > 0 && (
-            <TouchableOpacity 
-              onPress={() => setShowCartReview(true)} 
+            <TouchableOpacity
+              onPress={() => setShowCartReview(true)}
               style={styles.cartBtn}
             >
               <Ionicons name="bag" size={20} color={GlassTheme.colors.text} />
@@ -172,151 +125,116 @@ export default function OrderScreen() {
           <GlassCard gradient glow style={styles.heroCard}>
             <Text style={styles.heroLabel}>Deliver to</Text>
             <Text style={styles.heroValue}>{address}</Text>
-            <Text style={styles.heroHint}>Tap profile to change delivery address</Text>
+            <TouchableOpacity onPress={handleChangeAddress}>
+              <Text style={styles.heroHint}>Tap to change delivery address</Text>
+            </TouchableOpacity>
           </GlassCard>
 
-          {/* Search Section */}
+          {cartPharmacy && (
+            <GlassCard style={styles.pharmacyBanner}>
+              <Ionicons name="storefront-outline" size={18} color={GlassTheme.colors.primary} />
+              <Text style={styles.pharmacyBannerText}>Ordering from {cartPharmacy.pharmacyName}</Text>
+            </GlassCard>
+          )}
+
           <View style={styles.searchSection}>
             <View style={styles.searchContainer}>
               <GlassInput
-                placeholder="Search for medications..."
+                placeholder="Search for a medication..."
                 value={searchQuery}
                 onChangeText={setSearchQuery}
+                onSubmitEditing={handleSearch}
+                returnKeyType="search"
                 icon="search"
                 style={styles.searchInput}
               />
               {searchQuery ? (
-                <TouchableOpacity 
-                  onPress={() => setSearchQuery('')}
+                <TouchableOpacity
+                  onPress={() => { setSearchQuery(''); setResults([]); setSearched(false); }}
                   style={styles.clearSearchBtn}
                 >
-                  <Ionicons 
-                    name="close-circle" 
-                    size={20} 
-                    color={GlassTheme.colors.textMuted} 
-                  />
+                  <Ionicons name="close-circle" size={20} color={GlassTheme.colors.textMuted} />
                 </TouchableOpacity>
               ) : null}
             </View>
+            <GlassButton label="Compare Prices" onPress={handleSearch} size="sm" />
           </View>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
-              {searchQuery ? `Search Results (${filteredDrugs.length})` : 'Available Drugs'}
-            </Text>
-            {isSearching && (
-              <Text style={styles.loadingText}>Searching...</Text>
-            )}
-          </View>
+          {isSearching && <ActivityIndicator style={{ marginTop: 20 }} color={GlassTheme.colors.primary} />}
 
-          {filteredDrugs.length === 0 && searchQuery ? (
+          {!isSearching && searched && results.length === 0 && (
             <GlassCard style={styles.noResultsCard}>
               <Ionicons name="search" size={48} color={GlassTheme.colors.textMuted} />
-              <Text style={styles.noResultsTitle}>No medications found</Text>
+              <Text style={styles.noResultsTitle}>No pharmacies stock this yet</Text>
               <Text style={styles.noResultsText}>
-                Try searching with a different term or check your spelling
+                Try a different medication name, or check back later.
               </Text>
             </GlassCard>
-          ) : (
-            filteredDrugs.map((drug) => {
-              const selected = !!cart[drug.id];
-              const quantity = cart[drug.id]?.quantity || 0;
-              return (
-                <GlassCard
-                  key={drug.id}
-                  style={[styles.drugCard, selected && styles.drugSelected]}
-                >
-                  <TouchableOpacity 
-                    onPress={() => (drug.inStock !== false) ? toggleDrug(drug) : null}
-                    style={[styles.drugContent, (drug.inStock === false) && styles.drugContentDisabled]}
-                    disabled={drug.inStock === false}
-                  >
-                    <View style={styles.drugRow}>
-                      <View style={[
-                        styles.drugIcon, 
-                        selected && { backgroundColor: 'rgba(20,184,166,0.3)' },
-                        (drug.inStock === false) && styles.drugIconDisabled
-                      ]}>
-                        <Ionicons 
-                          name="medical" 
-                          size={20} 
-                          color={
-                            (drug.inStock === false)
-                              ? GlassTheme.colors.textMuted 
-                              : selected 
-                                ? GlassTheme.colors.accent 
-                                : GlassTheme.colors.primary
-                          } 
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={styles.drugHeader}>
-                          <Text style={[
-                            styles.drugName,
-                            (drug.inStock === false) && styles.drugNameDisabled
-                          ]}>
-                            {drug.name}
-                          </Text>
-                          {(drug.inStock === false) && (
-                            <Text style={styles.outOfStockBadge}>Out of Stock</Text>
-                          )}
-                        </View>
-                        <Text style={styles.drugDesc}>{drug.description}</Text>
-                        {drug.dosage && (
-                          <Text style={styles.drugDosage}>Dosage: {drug.dosage}</Text>
-                        )}
-                        {drug.manufacturer && (
-                          <Text style={styles.drugManufacturer}>
-                            By {drug.manufacturer}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={styles.drugPriceSection}>
-                        <Text style={[
-                          styles.drugPrice,
-                          (drug.inStock === false) && styles.drugPriceDisabled
-                        ]}>
-                          ₵{drug.price.toFixed(2)}
-                        </Text>
-                        {drug.category && (
-                          <Text style={styles.drugCategory}>{drug.category}</Text>
-                        )}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
+          )}
 
-                  {selected && (drug.inStock !== false) && (
-                    <View style={styles.quantityControls}>
-                      <TouchableOpacity
-                        onPress={() => updateQuantity(drug.id, quantity - 1)}
-                        style={styles.quantityBtn}
-                      >
-                        <Ionicons name="remove" size={16} color={GlassTheme.colors.text} />
-                      </TouchableOpacity>
-                      <Text style={styles.quantityText}>{quantity}</Text>
-                      <TouchableOpacity
-                        onPress={() => updateQuantity(drug.id, quantity + 1)}
-                        style={styles.quantityBtn}
-                      >
-                        <Ionicons name="add" size={16} color={GlassTheme.colors.text} />
-                      </TouchableOpacity>
-                      <Text style={styles.subtotal}>
-                        ₵{(drug.price * quantity).toFixed(2)}
-                      </Text>
-                    </View>
-                  )}
-                </GlassCard>
-              );
-            })
+          {!isSearching && !searched && (
+            <GlassCard style={styles.noResultsCard}>
+              <Ionicons name="pricetags-outline" size={40} color={GlassTheme.colors.textMuted} />
+              <Text style={styles.noResultsText}>
+                Search a medication above to compare prices across pharmacies near you.
+              </Text>
+            </GlassCard>
+          )}
+
+          {!isSearching && results.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>{results.length} pharmacy option{results.length === 1 ? '' : 's'} — cheapest first</Text>
+              {results.map((row) => {
+                const quantity = cartQuantityFor(row);
+                const selected = quantity > 0;
+                return (
+                  <GlassCard key={row.stockId} style={[styles.drugCard, selected && styles.drugSelected]}>
+                    <TouchableOpacity onPress={() => addRowToCart(row)} style={styles.drugContent}>
+                      <View style={styles.drugRow}>
+                        {row.imageBase64 ? (
+                          <Image source={{ uri: row.imageBase64 }} style={styles.drugIcon} />
+                        ) : (
+                          <View style={[styles.drugIcon, selected && styles.drugIconSelected]}>
+                            <Ionicons name="storefront" size={20} color={selected ? GlassTheme.colors.accent : GlassTheme.colors.primary} />
+                          </View>
+                        )}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.drugName}>{row.pharmacyName}</Text>
+                          {!!row.pharmacyAddress && <Text style={styles.drugDesc}>{row.pharmacyAddress}</Text>}
+                          <Text style={styles.drugDosage}>{row.quantity} in stock{row.rating ? ` · ★ ${row.rating.toFixed(1)}` : ''}</Text>
+                        </View>
+                        <View style={styles.drugPriceSection}>
+                          <Text style={styles.drugPrice}>₵{row.price.toFixed(2)}</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+
+                    {selected && (
+                      <View style={styles.quantityControls}>
+                        <TouchableOpacity onPress={() => updateQuantity(row.drugId, quantity - 1)} style={styles.quantityBtn}>
+                          <Ionicons name="remove" size={16} color={GlassTheme.colors.text} />
+                        </TouchableOpacity>
+                        <Text style={styles.quantityText}>{quantity}</Text>
+                        <TouchableOpacity onPress={() => updateQuantity(row.drugId, quantity + 1)} style={styles.quantityBtn}>
+                          <Ionicons name="add" size={16} color={GlassTheme.colors.text} />
+                        </TouchableOpacity>
+                        <Text style={styles.subtotal}>₵{(row.price * quantity).toFixed(2)}</Text>
+                      </View>
+                    )}
+                  </GlassCard>
+                );
+              })}
+            </>
           )}
 
           {cartItemsCount > 0 && (
             <View style={styles.cartActions}>
               <GlassCard style={styles.totalCard}>
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total ({cartItemsCount} items)</Text>
+                  <Text style={styles.totalLabel}>Subtotal ({cartItemsCount} items)</Text>
                   <Text style={styles.totalValue}>₵{total.toFixed(2)}</Text>
                 </View>
+                <Text style={styles.deliveryNote}>Pickup or delivery fee decided at the next step</Text>
               </GlassCard>
 
               <View style={styles.actionButtons}>
@@ -324,12 +242,12 @@ export default function OrderScreen() {
                   label="Review Cart"
                   onPress={() => setShowCartReview(true)}
                   size="lg"
+                  variant="outline"
                   style={styles.reviewBtn}
                 />
-                <GlassButton 
-                  label={`Quick Order - ₵${total.toFixed(2)}`}
-                  onPress={handleProceedToPayment} 
-                  loading={loading} 
+                <GlassButton
+                  label={`Continue - ₵${total.toFixed(2)}`}
+                  onPress={handleProceedToPayment}
                   size="lg"
                   style={styles.orderBtn}
                 />
@@ -338,14 +256,12 @@ export default function OrderScreen() {
           )}
         </ScrollView>
 
-        {/* Cart Review Modal */}
         <CartReviewModal
           visible={showCartReview}
           onClose={() => setShowCartReview(false)}
           deliveryAddress={address}
         />
 
-        {/* Location Picker Modal */}
         <LocationPickerModal
           visible={showLocationPicker}
           onClose={() => setShowLocationPicker(false)}
@@ -359,10 +275,10 @@ export default function OrderScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    padding: 20, 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
     gap: 12,
     justifyContent: 'space-between'
   },
@@ -371,9 +287,9 @@ const styles = StyleSheet.create({
     backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { 
-    fontSize: 22, 
-    fontWeight: '700', 
+  title: {
+    fontSize: 22,
+    fontWeight: '700',
     color: GlassTheme.colors.text,
     flex: 1,
     marginLeft: 12
@@ -409,12 +325,20 @@ const styles = StyleSheet.create({
   heroLabel: { color: GlassTheme.colors.textMuted, fontSize: 12 },
   heroValue: { color: GlassTheme.colors.text, fontSize: 18, fontWeight: '700', marginTop: 4 },
   heroHint: { color: GlassTheme.colors.textDim, fontSize: 11, marginTop: 6 },
-  
-  searchSection: { marginBottom: 8 },
+
+  pharmacyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: GlassTheme.colors.primaryLight,
+  },
+  pharmacyBannerText: { color: GlassTheme.colors.primary, fontWeight: '600', fontSize: 13 },
+
+  searchSection: { marginBottom: 8, gap: 8 },
   searchContainer: {
     position: 'relative',
   },
-  searchInput: { 
+  searchInput: {
     paddingRight: 50,
   },
   clearSearchBtn: {
@@ -424,25 +348,15 @@ const styles = StyleSheet.create({
     transform: [{ translateY: -10 }],
     padding: 4,
   },
-  
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+
+  sectionTitle: {
+    color: GlassTheme.colors.text,
+    fontWeight: '700',
+    fontSize: 15,
     marginTop: 8,
     marginBottom: 4,
   },
-  sectionTitle: { 
-    color: GlassTheme.colors.text, 
-    fontWeight: '700', 
-    fontSize: 15 
-  },
-  loadingText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  
+
   noResultsCard: {
     alignItems: 'center',
     padding: 32,
@@ -459,78 +373,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  
+
   drugCard: { padding: 0 },
   drugSelected: { borderColor: GlassTheme.colors.accent },
   drugContent: { padding: 16 },
-  drugContentDisabled: { 
-    opacity: 0.6,
-  },
   drugRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   drugIcon: {
     width: 44, height: 44, borderRadius: 14,
-    backgroundColor: 'rgba(37,99,235,0.2)',
+    backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  drugIconDisabled: {
-    backgroundColor: 'rgba(128,128,128,0.1)',
+  drugIconSelected: {
+    backgroundColor: GlassTheme.colors.accentLight,
   },
-  drugHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  drugName: { 
-    color: GlassTheme.colors.text, 
-    fontWeight: '600', 
-    fontSize: 14,
-    flex: 1,
-  },
-  drugNameDisabled: {
-    color: GlassTheme.colors.textMuted,
-  },
-  outOfStockBadge: {
-    color: '#EF4444',
-    fontSize: 10,
+  drugName: {
+    color: GlassTheme.colors.text,
     fontWeight: '600',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
+    fontSize: 14,
   },
-  drugDesc: { 
-    color: GlassTheme.colors.textMuted, 
-    fontSize: 12, 
-    marginBottom: 2 
+  drugDesc: {
+    color: GlassTheme.colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
   drugDosage: {
     color: GlassTheme.colors.textDim,
     fontSize: 11,
-    marginBottom: 2,
-  },
-  drugManufacturer: {
-    color: GlassTheme.colors.textDim,
-    fontSize: 10,
-    fontStyle: 'italic',
+    marginTop: 2,
   },
   drugPriceSection: {
     alignItems: 'flex-end',
   },
-  drugPrice: { 
-    color: GlassTheme.colors.accentSoft, 
-    fontWeight: '700', 
-    fontSize: 15 
+  drugPrice: {
+    color: GlassTheme.colors.accentSoft,
+    fontWeight: '700',
+    fontSize: 15
   },
-  drugPriceDisabled: {
-    color: GlassTheme.colors.textMuted,
-  },
-  drugCategory: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  
+
   quantityControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -539,13 +418,13 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: GlassTheme.colors.divider,
   },
   quantityBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -561,23 +440,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  
-  totalCard: { 
-    marginTop: 8 
+
+  totalCard: {
+    marginTop: 8
   },
   totalRow: {
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center'
   },
-  totalLabel: { 
-    color: GlassTheme.colors.textMuted, 
-    fontSize: 14 
+  totalLabel: {
+    color: GlassTheme.colors.textMuted,
+    fontSize: 14
   },
-  totalValue: { 
-    color: GlassTheme.colors.text, 
-    fontSize: 24, 
-    fontWeight: '700' 
+  totalValue: {
+    color: GlassTheme.colors.text,
+    fontSize: 24,
+    fontWeight: '700'
+  },
+  deliveryNote: {
+    color: GlassTheme.colors.textDim,
+    fontSize: 11,
+    marginTop: 4,
   },
 
   cartActions: {
@@ -590,7 +474,6 @@ const styles = StyleSheet.create({
   },
   reviewBtn: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   orderBtn: {
     flex: 2,

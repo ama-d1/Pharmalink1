@@ -1,0 +1,107 @@
+spring:
+  application:
+    name: auth-service
+
+  # ── Database ──────────────────────────────────────────────────────────────────
+  # Owns its own database — no other service is allowed to query this schema
+  # directly. userId is the only thing shared with other services.
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_auth
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  # ── JPA / Hibernate ──────────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate             # Phase 2 (MICROSERVICES_PLAN.md §6 step 9):
+                                     # Flyway now owns schema creation/changes (see
+                                     # db/migration/V1__init.sql and the flyway block
+                                     # below) — Hibernate only validates the entities
+                                     # match what Flyway already created, it no longer
+                                     # auto-alters the schema itself.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        # Do not set database-platform explicitly — Hibernate 6+ (Spring Boot 3+/4)
+        # auto-detects the PostgreSQL dialect; the old PostgreSQLDialect class
+        # reference causes a ClassNotFoundException on Hibernate 6+.
+
+  # ── Flyway ───────────────────────────────────────────────────────────────────
+  # Baseline (V1__init.sql) was hand-derived from this service's @Entity classes
+  # rather than pg_dump'd from a live DB — see the migration file's header
+  # comment and MICROSERVICES_PLAN.md Phase 2 step 9 for that caveat. Uses the
+  # same datasource as above by default (no separate flyway.url needed).
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  # ── Mail (used only for password-reset emails) ──────────────────────────────
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:your_email@gmail.com}     # ← REPLACE with real Gmail address
+    password: ${MAIL_PASSWORD:your_app_password}        # ← REPLACE with real Gmail App Password
+    test-connection: false
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+# ── JWT ──────────────────────────────────────────────────────────────────────
+# Same secret must be configured on the API Gateway once it exists, so it can
+# validate tokens this service issues. Overridable via env var so the secret
+# isn't hardcoded once this leaves local dev.
+security:
+  jwt:
+    secret: ${JWT_SECRET:pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+# ── user-profile-service ─────────────────────────────────────────────────────
+# register() calls this synchronously to create the profile row (see
+# ProfileClient javadoc for the reliability trade-off this implies).
+services:
+  profile:
+    base-url: ${USER_PROFILE_SERVICE_URL:http://localhost:8082}
+
+# ── Password reset deep link ────────────────────────────────────────────────
+# Fixes BACKEND_TODO.md's flagged issue: the old link pointed at
+# https://pharmalink.com/reset-password (a domain that doesn't exist and
+# wouldn't open the mobile app). This now uses a custom URL scheme deep link.
+app:
+  reset-password:
+    deep-link-base: ${RESET_PASSWORD_DEEP_LINK:pharmalink://reset-password}
+  # ── First-admin bootstrap (config/FirstAdminBootstrap.java) ────────────────
+  # Set to the email of an account you've already registered normally in the
+  # app. On startup, if no ADMIN exists yet, that account gets promoted to
+  # ADMIN automatically — the only supported way to create the very first
+  # admin without hand-editing the database. Permanently a no-op once any
+  # admin exists. Left blank by default — nothing happens unless you set it.
+  first-admin:
+    email: ${FIRST_ADMIN_EMAIL:}
+
+server:
+  port: 8081
+  address: 0.0.0.0
+
+# Tomcat/DispatcherServlet don't log individual requests by default either -
+# same reasoning as api-gateway's application.yaml. This makes every request
+# that actually reaches this service (method + mapped handler, or a 404/500
+# if nothing matched) show up in `docker compose logs -f auth-service`.
+logging:
+  level:
+    org.springframework.web: DEBUG

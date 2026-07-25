@@ -1,0 +1,43 @@
+package com.pharmalink.community_service.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "post_comments",
+    indexes = { @Index(name = "idx_comment_post", columnList = "postId") }
+)
+public class PostComment {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(nullable = false)
+    private String postId;
+
+    @Column(nullable = false)
+    private String userId;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String content;
+
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+    }
+
+    public PostComment() {}
+
+    public String getId() { return id; }
+    public String getPostId() { return postId; }
+    public void setPostId(String postId) { this.postId = postId; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+}

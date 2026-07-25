@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_payments
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Flyway owns schema creation/changes (see
+                                     # db/migration/V1__init.sql) -- Hibernate only validates.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+# ── Paystack ───────────────────────────────────────────────────────────────
+# GHS only — see PaystackClient's javadoc for why (Ghana-registered merchant
+# account, Paystack doesn't allow a second currency on a Ghana account).
+# secret-key must never be logged or returned in any response body.
+# callback-base-url is where Paystack's hosted checkout redirects the WebView
+# after payment — mostly a defense-in-depth fallback, since the app is
+# expected to detect that navigation client-side and call
+# /api/payments/verify/{reference} directly rather than relying on this URL
+# actually being hit. Point it at whatever the app currently uses to reach
+# api-gateway (see frontend/constants/api.ts and metro.config.js's proxy) —
+# a plain default is fine here since it's rarely actually invoked.
+paystack:
+  secret-key: ${PAYSTACK_SECRET_KEY:}
+  public-key: ${PAYSTACK_PUBLIC_KEY:}
+  callback-base-url: ${PAYSTACK_CALLBACK_BASE_URL:http://localhost:8080}
+
+# ── Cross-service calls ───────────────────────────────────────────────────
+# order: tells order-service to finalize payment status once Paystack has
+# actually confirmed a transaction (see OrderClient + the new
+# /internal/orders/{orderId}/payment-result endpoint).
+services:
+  order:
+    base-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+  # Added 2026-07-24 — resolves a pharmacy's Paystack subaccount code at
+  # checkout (see PharmacyClient).
+  pharmacy:
+    base-url: ${PHARMACY_SERVICE_URL:http://localhost:8084}
+
+server:
+  port: 8093
+  address: 0.0.0.0

@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
   Alert,
   Linking,
   Image,
-  Dimensions
+  Dimensions,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,18 +19,17 @@ import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassTheme } from '@/constants/glassTheme';
-import { getPharmacyById, Pharmacy } from '@/services/pharmacyService';
+import { useAuth } from '@/context/AuthContext';
+import {
+  getPharmacyById,
+  getPharmacyReviews,
+  submitPharmacyReview,
+  deletePharmacyReview,
+  Pharmacy,
+  PharmacyReview,
+} from '@/services/pharmacyService';
 
 const { width: screenWidth } = Dimensions.get('window');
-
-type Review = {
-  id: string;
-  userName: string;
-  rating: number;
-  comment: string;
-  date: string;
-  verified: boolean;
-};
 
 type PharmacyHours = {
   [key: string]: { open: string; close: string; closed?: boolean };
@@ -36,7 +37,6 @@ type PharmacyHours = {
 
 type DetailedPharmacy = Pharmacy & {
   images?: string[];
-  reviews?: Review[];
   detailedHours?: PharmacyHours;
   facilities?: string[];
   paymentMethods?: string[];
@@ -47,15 +47,28 @@ type DetailedPharmacy = Pharmacy & {
 export default function PharmacyDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
   const [pharmacy, setPharmacy] = useState<Pharmacy | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState<'info' | 'services' | 'reviews'>('info');
+
+  const [reviews, setReviews] = useState<PharmacyReview[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [myRatingDraft, setMyRatingDraft] = useState(0);
+  const [myCommentDraft, setMyCommentDraft] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
     if (id) {
       loadPharmacyDetails(id);
     }
   }, [id]);
+
+  useEffect(() => {
+    if (id && selectedTab === 'reviews') {
+      loadReviews(id);
+    }
+  }, [id, selectedTab]);
 
   const loadPharmacyDetails = async (pharmacyId: string) => {
     setLoading(true);
@@ -68,6 +81,61 @@ export default function PharmacyDetailsScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadReviews = useCallback(async (pharmacyId: string) => {
+    setReviewsLoading(true);
+    try {
+      const data = await getPharmacyReviews(pharmacyId);
+      setReviews(data);
+      const mine = user?.userId ? data.find((r) => r.userId === user.userId) : undefined;
+      setMyRatingDraft(mine?.rating ?? 0);
+      setMyCommentDraft(mine?.comment ?? '');
+    } finally {
+      setReviewsLoading(false);
+    }
+  }, [user?.userId]);
+
+  const myReview = user?.userId ? reviews.find((r) => r.userId === user.userId) : undefined;
+
+  const handleSubmitReview = async () => {
+    if (!id || !user?.userId) return;
+    if (myRatingDraft < 1) {
+      Alert.alert('Add a rating', 'Tap a star to rate this pharmacy before submitting.');
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      await submitPharmacyReview(id, myRatingDraft, myCommentDraft.trim());
+      await loadReviews(id);
+      await loadPharmacyDetails(id); // rating/reviewCount just changed
+    } catch (error: any) {
+      Alert.alert('Could not submit review', error?.message || 'Something went wrong.');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
+  const handleDeleteReview = () => {
+    if (!id || !myReview) return;
+    Alert.alert('Delete your review?', 'This can\'t be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deletePharmacyReview(id, myReview.id);
+            setMyRatingDraft(0);
+            setMyCommentDraft('');
+            await loadReviews(id);
+            await loadPharmacyDetails(id);
+          } catch (error: any) {
+            Alert.alert('Could not delete review', error?.message || 'Something went wrong.');
+          }
+        },
+      },
+    ]);
   };
 
   const handleCall = () => {
@@ -169,7 +237,7 @@ export default function PharmacyDetailsScreen() {
                   <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
                   {pharmacy.verified && (
                     <View style={styles.verifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                      <Ionicons name="checkmark-circle" size={16} color={GlassTheme.colors.success} />
                       <Text style={styles.verifiedText}>Verified</Text>
                     </View>
                   )}
@@ -185,10 +253,10 @@ export default function PharmacyDetailsScreen() {
                 styles.statusBadge,
                 pharmacy.isOpen ? styles.openBadge : styles.closedBadge
               ]}>
-                <Ionicons 
-                  name={pharmacy.isOpen ? "checkmark-circle" : "close-circle"} 
-                  size={14} 
-                  color={pharmacy.isOpen ? "#10B981" : "#EF4444"} 
+                <Ionicons
+                  name={pharmacy.isOpen ? "checkmark-circle" : "close-circle"}
+                  size={14}
+                  color={pharmacy.isOpen ? GlassTheme.colors.success : GlassTheme.colors.danger}
                 />
                 <Text style={[
                   styles.statusText,
@@ -348,7 +416,7 @@ export default function PharmacyDetailsScreen() {
               {/* Rating Overview */}
               <GlassCard style={styles.ratingOverview}>
                 <View style={styles.ratingHeader}>
-                  <Text style={styles.bigRating}>{pharmacy.rating}</Text>
+                  <Text style={styles.bigRating}>{pharmacy.rating > 0 ? pharmacy.rating.toFixed(1) : '—'}</Text>
                   <View style={styles.ratingDetails}>
                     <View style={styles.starsRow}>
                       {[1, 2, 3, 4, 5].map((star) => (
@@ -356,22 +424,93 @@ export default function PharmacyDetailsScreen() {
                           key={star}
                           name="star"
                           size={16}
-                          color={star <= Math.floor(pharmacy.rating) ? GlassTheme.colors.amber : GlassTheme.colors.textMuted}
+                          color={star <= Math.round(pharmacy.rating) ? GlassTheme.colors.amber : GlassTheme.colors.textMuted}
                         />
                       ))}
                     </View>
-                    <Text style={styles.reviewsText}>Based on {pharmacy.reviewCount} reviews</Text>
+                    <Text style={styles.reviewsText}>
+                      {pharmacy.reviewCount > 0 ? `Based on ${pharmacy.reviewCount} review${pharmacy.reviewCount === 1 ? '' : 's'}` : 'No reviews yet'}
+                    </Text>
                   </View>
                 </View>
               </GlassCard>
 
-              {/* Sample Reviews */}
-              <GlassCard style={styles.reviewCard}>
-                <Text style={styles.reviewsTitle}>Recent Reviews</Text>
-                <Text style={styles.reviewsPlaceholder}>
-                  Review functionality will be available soon. Users will be able to rate and review pharmacies to help others make informed decisions.
-                </Text>
+              {/* Write / edit your own review */}
+              <GlassCard style={styles.writeReviewCard}>
+                <Text style={styles.infoTitle}>{myReview ? 'Your review' : 'Write a review'}</Text>
+                <View style={styles.starPickerRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity key={star} onPress={() => setMyRatingDraft(star)} hitSlop={6}>
+                      <Ionicons
+                        name={star <= myRatingDraft ? 'star' : 'star-outline'}
+                        size={30}
+                        color={GlassTheme.colors.amber}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput
+                  style={styles.reviewInput}
+                  placeholder="Share your experience (optional)"
+                  placeholderTextColor={GlassTheme.colors.textDim}
+                  value={myCommentDraft}
+                  onChangeText={setMyCommentDraft}
+                  multiline
+                  maxLength={1000}
+                />
+                <View style={styles.reviewFormActions}>
+                  <GlassButton
+                    label={myReview ? 'Update Review' : 'Submit Review'}
+                    onPress={handleSubmitReview}
+                    loading={submittingReview}
+                    style={{ flex: 1 }}
+                  />
+                  {myReview && (
+                    <TouchableOpacity onPress={handleDeleteReview} style={styles.deleteReviewBtn} hitSlop={6}>
+                      <Ionicons name="trash-outline" size={20} color={GlassTheme.colors.danger} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </GlassCard>
+
+              {/* Review list */}
+              {reviewsLoading ? (
+                <ActivityIndicator color={GlassTheme.colors.accent} style={{ marginTop: 12 }} />
+              ) : reviews.length === 0 ? (
+                <GlassCard style={styles.reviewCard}>
+                  <View style={styles.reviewsEmptyIconWrap}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={28} color={GlassTheme.colors.primary} />
+                  </View>
+                  <Text style={styles.reviewsTitle}>No reviews yet</Text>
+                  <Text style={styles.reviewsPlaceholder}>
+                    Be the first to share your experience with this pharmacy.
+                  </Text>
+                </GlassCard>
+              ) : (
+                reviews.map((review) => (
+                  <GlassCard key={review.id} style={styles.reviewItemCard}>
+                    <View style={styles.reviewItemHeader}>
+                      <Text style={styles.reviewAuthor}>
+                        {review.userId === user?.userId ? 'You' : review.authorName}
+                      </Text>
+                      <View style={styles.starsRow}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Ionicons
+                            key={star}
+                            name="star"
+                            size={12}
+                            color={star <= review.rating ? GlassTheme.colors.amber : GlassTheme.colors.textMuted}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                    {!!review.comment && <Text style={styles.reviewComment}>{review.comment}</Text>}
+                    <Text style={styles.reviewDate}>
+                      {new Date(review.updatedAt || review.createdAt).toLocaleDateString()}
+                    </Text>
+                  </GlassCard>
+                ))
+              )}
             </View>
           )}
         </ScrollView>
@@ -423,7 +562,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    // FIXED — was 'rgba(20,184,166,0.2)', a teal matching no GlassTheme
+    // token (accent is '#0EA5E9') — a leftover from an earlier palette.
+    backgroundColor: GlassTheme.colors.accentLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -478,7 +619,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
@@ -501,13 +642,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    backgroundColor: GlassTheme.colors.successLight, // FIXED — hardcoded 'rgba(16, 185, 129, 0.1)'
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   verifiedText: {
-    color: '#10B981',
+    color: GlassTheme.colors.success, // FIXED — hardcoded '#10B981'
     fontSize: 10,
     fontWeight: '600',
   },
@@ -536,20 +677,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   openBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    backgroundColor: GlassTheme.colors.successLight, // FIXED — hardcoded 'rgba(16, 185, 129, 0.1)'
   },
   closedBadge: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: GlassTheme.colors.dangerLight, // FIXED — hardcoded 'rgba(239, 68, 68, 0.1)'
   },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
   },
   openText: {
-    color: '#10B981',
+    color: GlassTheme.colors.success, // FIXED — hardcoded '#10B981'
   },
   closedText: {
-    color: '#EF4444',
+    color: GlassTheme.colors.danger, // FIXED — hardcoded '#EF4444'
   },
   ratingContainer: {
     flexDirection: 'row',
@@ -585,7 +726,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    // FIXED — was invisible 'rgba(255,255,255,0.1)' against the flat
+    // light background (the exact low-contrast issue FRONTEND_TODO
+    // flagged on this screen). surfaceAlt is the real token for a subtle,
+    // visible-but-quiet card surface.
+    backgroundColor: GlassTheme.colors.surfaceAlt,
     borderRadius: 12,
     gap: 8,
   },
@@ -597,7 +742,10 @@ const styles = StyleSheet.create({
 
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    // FIXED — was near-invisible 'rgba(255,255,255,0.05)' against the
+    // flat light background. surfaceAlt gives the tab track a real,
+    // subtly-visible surface to sit on.
+    backgroundColor: GlassTheme.colors.surfaceAlt,
     borderRadius: 12,
     padding: 4,
     marginBottom: 20,
@@ -612,7 +760,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   activeTab: {
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
   },
   tabText: {
     color: GlassTheme.colors.textMuted,
@@ -676,14 +824,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was near-invisible 'rgba(255,255,255,0.05)'
     borderRadius: 8,
   },
   serviceIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -719,18 +867,82 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   reviewCard: {
-    gap: 12,
+    gap: 10,
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  reviewsEmptyIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
   reviewsTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: GlassTheme.colors.text,
+    textAlign: 'center',
   },
   reviewsPlaceholder: {
     fontSize: 14,
     color: GlassTheme.colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
-    fontStyle: 'italic',
+  },
+
+  writeReviewCard: {
+    gap: 12,
+  },
+  starPickerRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  reviewInput: {
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderRadius: 10,
+    padding: 12,
+    minHeight: 70,
+    fontSize: 14,
+    color: GlassTheme.colors.text,
+    textAlignVertical: 'top',
+  },
+  reviewFormActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  deleteReviewBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: GlassTheme.colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  reviewItemCard: {
+    gap: 6,
+  },
+  reviewItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  reviewAuthor: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GlassTheme.colors.text,
+  },
+  reviewComment: {
+    fontSize: 14,
+    color: GlassTheme.colors.textMuted,
+    lineHeight: 20,
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: GlassTheme.colors.textDim,
   },
 });

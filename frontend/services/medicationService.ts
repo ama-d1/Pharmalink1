@@ -1,9 +1,29 @@
 import { API } from '@/constants/api';
+import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
+import { getAuthHeaders } from '@/utils/authHeaders';
 
 const BASE_URL = API.medications;
 const DRUG_URL = API.drugSearch;
 
 // ── Medication CRUD ────────────────────────────────────────────────────────────
+
+// Reads the backend's actual error message out of the response body instead of
+// discarding it. medication-service returns { message: "..." } (MedicationResponse)
+// on failures (validation errors, ownership checks, etc.) — previously every
+// !response.ok here just threw a generic "Request failed (400)" that the outer
+// catch then overwrote AGAIN with an even more generic "Network error." message,
+// so the user never saw why the request actually failed.
+async function extractErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    if (body && typeof body.message === 'string' && body.message.trim()) {
+      return body.message;
+    }
+  } catch {
+    // body wasn't JSON (or was empty) — fall through to fallback
+  }
+  return fallback;
+}
 
 export const addMedication = async (
   userId: string,
@@ -14,72 +34,126 @@ export const addMedication = async (
   startDate: string,
   instructions?: string
 ) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/add`, {
+    response = await fetchWithTimeout(`${BASE_URL}/add`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
       body: JSON.stringify({ userId, name, dosage, frequency, reminderTime, startDate, instructions }),
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
   }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  return await response.json();
 };
 
 export const getUserMedications = async (userId: string) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/user/${userId}`, {
-      headers: { 'Content-Type': 'application/json' },
+    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}`, {
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
   }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 };
 
 export const updateDoseStatus = async (medicationId: string, status: string) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/${medicationId}/dose-status?status=${status}`, {
+    response = await fetchWithTimeout(`${BASE_URL}/${medicationId}/dose-status?status=${status}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
+  }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  return await response.json();
+};
+
+export const deleteMedication = async (medicationId: string) => {
+  const response = await fetchWithTimeout(`${BASE_URL}/${medicationId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error('Could not delete medication.');
   }
 };
 
 export const countActiveMedications = async (userId: string) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/user/${userId}/count`, {
-      headers: { 'Content-Type': 'application/json' },
+    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/count`, {
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
   }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  return await response.json();
 };
 
 export const getActiveMedicationCount = async (userId: string) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/user/${userId}/count`, {
-      headers: { 'Content-Type': 'application/json' },
+    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/count`, {
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
   }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  return await response.json();
 };
 
 export const getPendingMedications = async (userId: string) => {
+  let response: Response;
   try {
-    const response = await fetch(`${BASE_URL}/user/${userId}/active`, {
-      headers: { 'Content-Type': 'application/json' },
+    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/active`, {
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
-    return await response.json();
-  } catch {
+  } catch (err: any) {
+    if (err?.message === 'TIMEOUT') {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
     throw new Error('Network error. Please try again.');
   }
+  if (!response.ok) {
+    throw new Error(await extractErrorMessage(response, `Request failed (${response.status})`));
+  }
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 };
 
 // ── Drug Search (OpenFDA proxy) ────────────────────────────────────────────────
@@ -115,7 +189,15 @@ export type DrugSearchResult = {
 export const getDrugSuggestions = async (query: string): Promise<DrugSuggestion[]> => {
   if (!query || query.trim().length < 2) return [];
   try {
-    const res = await fetch(`${DRUG_URL}/suggest?q=${encodeURIComponent(query.trim())}&limit=8`);
+    // NOTE: /api/drugs/** is not in api-gateway's unauthenticated open-path
+    // list (only /api/auth/**, /ws/**, and */health are open) — this route
+    // needs the same auth header as everything else, even though it's just
+    // a search-suggestion endpoint.
+    const res = await fetchWithTimeout(
+      `${DRUG_URL}/suggest?q=${encodeURIComponent(query.trim())}&limit=8`,
+      { headers: await getAuthHeaders() },
+      6000
+    );
     if (!res.ok) return [];
     return await res.json();
   } catch {
@@ -131,8 +213,10 @@ export const getDrugSuggestions = async (query: string): Promise<DrugSuggestion[
 export const searchDrugs = async (query: string, limit = 10): Promise<DrugSearchResult[]> => {
   if (!query || query.trim().length < 2) return [];
   try {
-    const res = await fetch(
-      `${DRUG_URL}/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`
+    const res = await fetchWithTimeout(
+      `${DRUG_URL}/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`,
+      { headers: await getAuthHeaders() },
+      6000
     );
     if (!res.ok) return [];
     return await res.json();
@@ -147,7 +231,7 @@ export const searchDrugs = async (query: string, limit = 10): Promise<DrugSearch
  */
 export const getDrugCatalog = async (): Promise<DrugSearchResult[]> => {
   try {
-    const res = await fetch(`${DRUG_URL}/catalog`);
+    const res = await fetchWithTimeout(`${DRUG_URL}/catalog`, { headers: await getAuthHeaders() }, 6000);
     if (!res.ok) return [];
     return await res.json();
   } catch {

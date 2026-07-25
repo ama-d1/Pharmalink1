@@ -1,196 +1,194 @@
 import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  Alert 
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassButton } from '@/components/glass/GlassButton';
-import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
-import { processPayment, createOrder } from '@/services/orderService';
+import { createOrder } from '@/services/orderService';
+import { initializePayment, verifyPayment } from '@/services/paymentService';
+import { requestDelivery } from '@/services/deliveryService';
 
-type PaymentMethod = 'momo' | 'card' | 'bank';
+// FIXED 2026-07-23 — the backend's Paystack callback_url is built from
+// PAYSTACK_CALLBACK_BASE_URL (payment-service's application.yaml), which
+// defaults to http://localhost:8080 and was never overridden with something
+// actually reachable from a phone — that host means "the phone's own
+// localhost" to Paystack's hosted checkout page, so the WebView tried to
+// load a dead address and showed a real connection-error page right after a
+// successful payment. Matching (and blocking) purely on the URL's PATH
+// here — not the full URL/host — sidesteps that entirely: it doesn't matter
+// what unreachable host the backend put in the callback URL, because the
+// WebView is never allowed to actually try loading it.
+const CALLBACK_PATH_MARKER = '/api/payments/callback/';
 
+// REWRITTEN 2026-07-23 — this used to be a form collecting fake MoMo/Card/
+// Bank details that went nowhere real (orderService.processPayment() just
+// flipped a status flag, no gateway ever saw any of it — see
+// BACKEND_TODO.md's old "Payment" section). Now: create the order, ask the
+// new payment-service to start a real Paystack transaction, open Paystack's
+// own hosted checkout page in a WebView (it already lets the user pick
+// Mobile Money/Card/Bank itself — no need to duplicate that choice here),
+// then verify server-side once the WebView reports the checkout finished.
 export default function PaymentScreen() {
   const router = useRouter();
-  const { address } = useLocalSearchParams<{ address: string }>();
+  // fulfillmentType/deliveryFee/phoneNumber/instructions/deliverySpeed all
+  // come from the new checkout-fulfillment step (delivery.tsx) — see that
+  // file's rewritten purpose. Defaults here are a safety net in case this
+  // screen is ever reached without going through that step first, not the
+  // normal path.
+  const { address, fulfillmentType, deliveryFee: deliveryFeeParam, phoneNumber, instructions, deliverySpeed } =
+    useLocalSearchParams<{ address: string; fulfillmentType?: string; deliveryFee?: string; phoneNumber?: string; instructions?: string; deliverySpeed?: string }>();
   const { user } = useAuth();
-  const { getCartItems, getCartTotal, clearCart } = useCart();
-  
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>('momo');
-  const [loading, setLoading] = useState(false);
-  
-  // Mobile Money fields
-  const [momoNumber, setMomoNumber] = useState('');
-  const [momoProvider, setMomoProvider] = useState<'mtn' | 'vodafone' | 'airtel'>('mtn');
-  
-  // Card fields
-  const [cardNumber, setCardNumber] = useState('');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [cvv, setCvv] = useState('');
-  const [cardName, setCardName] = useState('');
+  const { getCartItems, getCartTotal, getCartPharmacy, clearCart } = useCart();
 
+  const [loading, setLoading] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [pendingReference, setPendingReference] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const isPickup = fulfillmentType === 'PICKUP';
   const cartItems = getCartItems();
   const subtotal = getCartTotal();
-  const deliveryFee = 5.00;
+  const deliveryFee = isPickup ? 0 : Number(deliveryFeeParam || 0);
   const total = subtotal + deliveryFee;
 
-  const paymentMethods = [
-    {
-      id: 'momo' as PaymentMethod,
-      name: 'Mobile Money',
-      icon: 'phone-portrait',
-      description: 'Pay with MTN, Vodafone, or AirtelTigo'
-    },
-    {
-      id: 'card' as PaymentMethod,
-      name: 'Credit/Debit Card',
-      icon: 'card',
-      description: 'Visa, Mastercard, etc.'
-    },
-    {
-      id: 'bank' as PaymentMethod,
-      name: 'Bank Transfer',
-      icon: 'business',
-      description: 'Direct bank transfer'
-    }
-  ];
-
-  const momoProviders = [
-    { id: 'mtn', name: 'MTN MoMo', color: '#FFCC00' },
-    { id: 'vodafone', name: 'Vodafone Cash', color: '#E60000' },
-    { id: 'airtel', name: 'AirtelTigo Money', color: '#FF6600' }
-  ];
-
   const handlePayment = async () => {
-    if (!user?.userId) {
+    if (!user?.userId || !user?.email) {
       Alert.alert('Error', 'Please log in to complete payment');
       return;
     }
-
     if (cartItems.length === 0) {
       Alert.alert('Error', 'Cart is empty');
       return;
     }
 
-    // Validate payment method details
-    if (selectedPayment === 'momo' && !momoNumber) {
-      Alert.alert('Error', 'Please enter your mobile money number');
-      return;
-    }
-
-    if (selectedPayment === 'card' && (!cardNumber || !expiryDate || !cvv || !cardName)) {
-      Alert.alert('Error', 'Please fill in all card details');
-      return;
-    }
-
     setLoading(true);
-
     try {
-      // Create order first
-      const orderItems = cartItems.map(item => ({
+      const orderItems = cartItems.map((item) => ({
         drugName: item.name,
         quantity: item.quantity,
         unitPrice: item.price,
       }));
 
-      const paymentMethodString = selectedPayment === 'momo' 
-        ? `Mobile Money (${momoProviders.find(p => p.id === momoProvider)?.name})`
-        : selectedPayment === 'card' 
-          ? 'Credit/Debit Card'
-          : 'Bank Transfer';
-
+      // Added 2026-07-23: pharmacyId comes from the cart itself (every item
+      // in it is guaranteed to be from the same pharmacy — see
+      // CartContext's addToCart/replaceCartWithItem) rather than being
+      // guessed or omitted, now that orders are pharmacy-specific.
+      const pharmacyId = getCartPharmacy()?.pharmacyId;
       const order = await createOrder(
-        user.userId, 
-        orderItems, 
-        address || 'Default Address', 
-        paymentMethodString
+        user.userId, orderItems, address || 'Default Address', 'Paystack', pharmacyId,
+        isPickup ? 'PICKUP' : 'DELIVERY', deliveryFee
       );
 
-      // Process payment
-      const paymentData = selectedPayment === 'momo' 
-        ? { 
-            method: 'momo', 
-            phoneNumber: momoNumber, 
-            provider: momoProvider,
-            amount: total
-          }
-        : selectedPayment === 'card'
-          ? {
-              method: 'card',
-              cardNumber: cardNumber.replace(/\s/g, ''),
-              expiryDate,
-              cvv,
-              cardholderName: cardName,
-              amount: total
-            }
-          : {
-              method: 'bank',
-              amount: total
-            };
+      const payment = await initializePayment(order.id, user.userId, user.email, total);
 
-      await processPayment(order.id, paymentData);
-      
-      // Clear cart and navigate to delivery options
-      clearCart();
-      Alert.alert(
-        'Payment Successful!', 
-        `Your payment of ₵${total.toFixed(2)} has been processed successfully.`,
-        [
-          { 
-            text: 'Set Delivery Options', 
-            onPress: () => router.push({
-              pathname: '/delivery',
-              params: { orderId: order.id }
-            })
-          }
-        ]
-      );
+      if (!payment.authorizationUrl) {
+        throw new Error('Paystack did not return a checkout URL');
+      }
 
-    } catch (error) {
-      console.error('Payment error:', error);
-      Alert.alert(
-        'Payment Failed', 
-        'There was an issue processing your payment. Please try again or contact support.'
-      );
+      setPendingOrderId(order.id);
+      setPendingReference(payment.reference);
+      setCheckoutUrl(payment.authorizationUrl);
+    } catch (error: any) {
+      console.error('Payment initialization error:', error);
+      Alert.alert('Payment Failed', error?.message || 'Could not start payment. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-    const matches = v.match(/\d{4,16}/g);
-    const match = matches && matches[0] || '';
-    const parts = [];
-    
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
+  // Runs BEFORE the WebView attempts to load a URL — returning false here
+  // stops that load from ever happening. This is what actually prevents the
+  // dead-callback-URL error page from appearing (see the comment above
+  // CALLBACK_PATH_MARKER): we never let the WebView try to fetch it at all,
+  // we just recognize the path and handle it entirely in JS instead.
+  const handleShouldStartLoad = (request: { url: string }): boolean => {
+    if (verifying || !request.url.includes(CALLBACK_PATH_MARKER)) return true;
+
+    const reference = request.url.split(CALLBACK_PATH_MARKER)[1]?.split(/[?#]/)[0];
+    if (reference) {
+      handlePaystackCallback(reference);
     }
-    
-    if (parts.length) {
-      return parts.join(' ');
-    } else {
-      return v;
-    }
+    return false; // block the actual load
   };
 
-  const formatExpiryDate = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-    if (v.length >= 2) {
-      return v.substring(0, 2) + '/' + v.substring(2, 4);
+  // REWRITTEN 2026-07-23 — the fulfillment choice (pickup vs. delivery) and
+  // the fee are now decided BEFORE payment (see delivery.tsx), so this no
+  // longer needs to prompt the user into a separate post-payment step.
+  // For a delivery order, the actual delivery-service request now fires
+  // automatically right here, using the details already collected on the
+  // fulfillment screen — that's what "pay once, delivery is already in
+  // motion" from your description actually requires; a manual follow-up
+  // step the user could forget to complete wasn't it.
+  const handlePaystackCallback = async (reference: string) => {
+    setVerifying(true);
+    setCheckoutUrl(null);
+
+    try {
+      const result = await verifyPayment(reference);
+      if (result.status !== 'SUCCESS') {
+        Alert.alert('Payment Failed', 'Paystack reported this payment did not succeed. Please try again.');
+        return;
+      }
+
+      clearCart();
+
+      if (isPickup || !pendingOrderId) {
+        Alert.alert(
+          'Payment Successful!',
+          `Your payment of ₵${total.toFixed(2)} has been confirmed. Head to the pharmacy to pick up your order once it's ready.`,
+          [{ text: 'Done', onPress: () => router.replace('/(tabs)') }]
+        );
+        return;
+      }
+
+      // Delivery order — request it now, automatically. A failure here
+      // does NOT mean the payment failed (it already succeeded and is
+      // recorded) — it just means the delivery leg needs a retry/manual
+      // follow-up, so this is surfaced but doesn't block the success path.
+      try {
+        const delivery = await requestDelivery({
+          orderId: pendingOrderId,
+          deliverySpeed: (deliverySpeed as 'standard' | 'express' | 'priority') || 'standard',
+          address: address || 'Default Address',
+          phoneNumber: phoneNumber || '',
+          instructions: instructions || undefined,
+          estimatedFee: deliveryFee,
+        });
+        // Added 2026-07-23 (task 40) — routes straight into the new live
+        // tracking screen instead of just going home, so "track it until it
+        // arrives" is actually one tap away right when it matters most.
+        Alert.alert(
+          'Payment Successful!',
+          `Your payment of ₵${total.toFixed(2)} has been confirmed and your delivery is on its way to being assigned. Tracking number: ${delivery.trackingNumber}.`,
+          [{ text: 'Track Delivery', onPress: () => router.replace({ pathname: '/delivery-tracking', params: { trackingNumber: delivery.trackingNumber } }) }]
+        );
+      } catch (deliveryError: any) {
+        // Was previously a hardcoded message that hid whatever actually
+        // failed (deliveryService.ts's requestDelivery used to swallow the
+        // real backend error too — fixed alongside this). Surfacing the
+        // real reason here is what lets this actually get diagnosed and
+        // fixed instead of guessed at.
+        console.error('Auto delivery request failed:', deliveryError);
+        Alert.alert(
+          'Payment Successful — Delivery Request Failed',
+          `Your payment of ₵${total.toFixed(2)} has been confirmed, but starting your delivery failed: "${deliveryError?.message || 'Unknown error'}". Please contact support with your order ID: ${pendingOrderId}.`,
+          [{ text: 'Done', onPress: () => router.replace('/(tabs)') }]
+        );
+      }
+    } catch (error: any) {
+      console.error('Payment verification error:', error);
+      Alert.alert('Verification Failed', error?.message || 'Could not confirm your payment. Please contact support if you were charged.');
+    } finally {
+      setVerifying(false);
+      setPendingOrderId(null);
     }
-    return v;
   };
 
   return (
@@ -204,7 +202,6 @@ export default function PaymentScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
-          {/* Order Summary */}
           <GlassCard style={styles.summaryCard}>
             <Text style={styles.sectionTitle}>Order Summary</Text>
             <View style={styles.summaryRow}>
@@ -212,7 +209,7 @@ export default function PaymentScreen() {
               <Text style={styles.summaryValue}>₵{subtotal.toFixed(2)}</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Delivery Fee</Text>
+              <Text style={styles.summaryLabel}>{isPickup ? 'Pickup' : 'Delivery Fee'}</Text>
               <Text style={styles.summaryValue}>₵{deliveryFee.toFixed(2)}</Text>
             </View>
             <View style={[styles.summaryRow, styles.totalRow]}>
@@ -221,153 +218,67 @@ export default function PaymentScreen() {
             </View>
           </GlassCard>
 
-          {/* Payment Methods */}
-          <Text style={styles.sectionTitle}>Payment Method</Text>
-          {paymentMethods.map((method) => (
-            <TouchableOpacity
-              key={method.id}
-              onPress={() => setSelectedPayment(method.id)}
-              style={[
-                styles.paymentMethod,
-                selectedPayment === method.id && styles.paymentMethodSelected
-              ]}
-            >
-              <View style={styles.paymentMethodContent}>
-                <View style={styles.paymentMethodLeft}>
-                  <View style={[
-                    styles.paymentMethodIcon,
-                    selectedPayment === method.id && styles.paymentMethodIconSelected
-                  ]}>
-                    <Ionicons 
-                      name={method.icon as any} 
-                      size={20} 
-                      color={
-                        selectedPayment === method.id 
-                          ? GlassTheme.colors.accent 
-                          : GlassTheme.colors.primary
-                      } 
-                    />
-                  </View>
-                  <View>
-                    <Text style={styles.paymentMethodName}>{method.name}</Text>
-                    <Text style={styles.paymentMethodDesc}>{method.description}</Text>
-                  </View>
-                </View>
-                <View style={[
-                  styles.radioButton,
-                  selectedPayment === method.id && styles.radioButtonSelected
-                ]}>
-                  {selectedPayment === method.id && (
-                    <View style={styles.radioButtonInner} />
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-
-          {/* Payment Details */}
-          {selectedPayment === 'momo' && (
-            <GlassCard style={styles.paymentDetails}>
-              <Text style={styles.sectionTitle}>Mobile Money Details</Text>
-              
-              <Text style={styles.fieldLabel}>Select Provider</Text>
-              <View style={styles.providerContainer}>
-                {momoProviders.map((provider) => (
-                  <TouchableOpacity
-                    key={provider.id}
-                    onPress={() => setMomoProvider(provider.id as any)}
-                    style={[
-                      styles.providerBtn,
-                      momoProvider === provider.id && styles.providerBtnSelected
-                    ]}
-                  >
-                    <Text style={[
-                      styles.providerText,
-                      momoProvider === provider.id && styles.providerTextSelected
-                    ]}>
-                      {provider.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <GlassInput
-                label="Mobile Number"
-                placeholder="024 123 4567"
-                value={momoNumber}
-                onChangeText={setMomoNumber}
-                keyboardType="phone-pad"
-                icon="call"
-              />
-            </GlassCard>
-          )}
-
-          {selectedPayment === 'card' && (
-            <GlassCard style={styles.paymentDetails}>
-              <Text style={styles.sectionTitle}>Card Details</Text>
-              
-              <GlassInput
-                label="Cardholder Name"
-                placeholder="John Doe"
-                value={cardName}
-                onChangeText={setCardName}
-                icon="person"
-              />
-              
-              <GlassInput
-                label="Card Number"
-                placeholder="1234 5678 9012 3456"
-                value={cardNumber}
-                onChangeText={(value) => setCardNumber(formatCardNumber(value))}
-                keyboardType="number-pad"
-                maxLength={19}
-                icon="card"
-              />
-              
-              <View style={styles.cardRow}>
-                <GlassInput
-                  label="Expiry Date"
-                  placeholder="MM/YY"
-                  value={expiryDate}
-                  onChangeText={(value) => setExpiryDate(formatExpiryDate(value))}
-                  keyboardType="number-pad"
-                  maxLength={5}
-                  style={styles.cardFieldHalf}
-                />
-                
-                <GlassInput
-                  label="CVV"
-                  placeholder="123"
-                  value={cvv}
-                  onChangeText={setCvv}
-                  keyboardType="number-pad"
-                  maxLength={4}
-                  secureTextEntry
-                  style={styles.cardFieldHalf}
-                />
-              </View>
-            </GlassCard>
-          )}
-
-          {selectedPayment === 'bank' && (
-            <GlassCard style={styles.paymentDetails}>
-              <Text style={styles.sectionTitle}>Bank Transfer</Text>
-              <Text style={styles.bankInstructions}>
-                You will receive bank details after confirming your order. 
-                Complete the transfer within 24 hours to secure your order.
-              </Text>
-            </GlassCard>
-          )}
+          <GlassCard style={styles.paystackCard}>
+            <View style={styles.paystackHeader}>
+              <Ionicons name="lock-closed" size={20} color={GlassTheme.colors.primary} />
+              <Text style={styles.sectionTitle}>Secure Payment via Paystack</Text>
+            </View>
+            <Text style={styles.paystackDesc}>
+              You&apos;ll be taken to Paystack&apos;s secure checkout, where you can pay by Mobile Money,
+              card, or bank transfer. Your payment details never pass through this app.
+            </Text>
+          </GlassCard>
         </ScrollView>
 
         <View style={styles.footer}>
           <GlassButton
-            label={`Pay ₵${total.toFixed(2)}`}
+            label={verifying ? 'Confirming payment...' : `Pay ₵${total.toFixed(2)}`}
             onPress={handlePayment}
-            loading={loading}
+            loading={loading || verifying}
             size="lg"
           />
         </View>
+
+        <Modal visible={!!checkoutUrl} animationType="slide" onRequestClose={() => setCheckoutUrl(null)}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setCheckoutUrl(null)} style={styles.backBtn}>
+                <Ionicons name="close" size={22} color={GlassTheme.colors.text} />
+              </TouchableOpacity>
+              <Text style={styles.title}>Paystack Checkout</Text>
+            </View>
+            {/* Fallback for when Paystack's post-payment redirect doesn't get
+                intercepted by handleShouldStartLoad for any reason (e.g. it
+                loads via a mechanism that isn't a top-level navigation, or
+                the WebView is slow to fire the event) — without this, a user
+                whose payment actually succeeded could get stuck staring at
+                Paystack's own success page with no way to proceed to
+                tracking. Manually re-triggers the exact same verification
+                path handleShouldStartLoad would have. */}
+            {verifying ? (
+              <View style={styles.verifyingBanner}>
+                <Text style={styles.verifyingBannerText}>Confirming your payment…</Text>
+              </View>
+            ) : (
+              pendingReference && (
+                <TouchableOpacity
+                  style={styles.manualVerifyBtn}
+                  onPress={() => pendingReference && handlePaystackCallback(pendingReference)}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={16} color={GlassTheme.colors.primary} />
+                  <Text style={styles.manualVerifyText}>Already paid? Tap here to confirm</Text>
+                </TouchableOpacity>
+              )
+            )}
+            {checkoutUrl && (
+              <WebView
+                source={{ uri: checkoutUrl }}
+                onShouldStartLoadWithRequest={handleShouldStartLoad}
+                startInLoadingState
+              />
+            )}
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
     </GlassBackground>
   );
@@ -379,6 +290,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     gap: 12,
+  },
+  verifyingBanner: {
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: GlassTheme.colors.primaryLight,
+  },
+  verifyingBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GlassTheme.colors.primary,
+  },
+  manualVerifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: GlassTheme.colors.primaryLight,
+  },
+  manualVerifyText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: GlassTheme.colors.primary,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: GlassTheme.colors.divider,
   },
   backBtn: {
     width: 40,
@@ -397,7 +339,6 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 120,
   },
-  
   summaryCard: {
     marginBottom: 24,
   },
@@ -424,7 +365,7 @@ const styles = StyleSheet.create({
   totalRow: {
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: GlassTheme.colors.divider,
     marginTop: 4,
   },
   totalLabel: {
@@ -437,115 +378,20 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
-  
-  paymentMethod: {
-    marginBottom: 12,
-  },
-  paymentMethodSelected: {
-    borderColor: GlassTheme.colors.accent,
-  },
-  paymentMethodContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-  },
-  paymentMethodLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  paymentMethodIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(37,99,235,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  paymentMethodIconSelected: {
-    backgroundColor: 'rgba(20,184,166,0.3)',
-  },
-  paymentMethodName: {
-    color: GlassTheme.colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  paymentMethodDesc: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  radioButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: GlassTheme.colors.textMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioButtonSelected: {
-    borderColor: GlassTheme.colors.accent,
-  },
-  radioButtonInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: GlassTheme.colors.accent,
-  },
-  
-  paymentDetails: {
-    marginTop: 16,
-  },
-  
-  fieldLabel: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  providerContainer: {
-    flexDirection: 'row',
+  paystackCard: {
     gap: 8,
-    marginBottom: 16,
   },
-  providerBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-  },
-  providerBtnSelected: {
-    backgroundColor: GlassTheme.colors.accent,
-  },
-  providerText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  providerTextSelected: {
-    color: 'white',
-  },
-  
-  cardRow: {
+  paystackHeader: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
   },
-  cardFieldHalf: {
-    flex: 1,
-  },
-  
-  bankInstructions: {
+  paystackDesc: {
     color: GlassTheme.colors.textMuted,
     fontSize: 14,
     lineHeight: 20,
   },
-  
   footer: {
     position: 'absolute',
     bottom: 0,
@@ -553,7 +399,9 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 20,
     paddingBottom: 40,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    backdropFilter: 'blur(20px)',
+    backgroundColor: GlassTheme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: GlassTheme.colors.divider,
+    ...GlassTheme.shadow.sm,
   },
 });

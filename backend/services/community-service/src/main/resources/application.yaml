@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: community-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_community
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Phase 2 (MICROSERVICES_PLAN.md sec 6 step 9): Flyway now
+                                     # owns schema creation/changes (see db/migration/V1__init.sql
+                                     # and the flyway block below) -- Hibernate only validates.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # ---- Flyway --------------------------------------------
+  # Baseline (V1__init.sql) was hand-derived from this service's @Entity classes
+  # rather than pg_dump'ed from a live DB -- see the migration file's header
+  # comment and MICROSERVICES_PLAN.md Phase 2 step 9 for that caveat.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+# ── Cross-service calls to user-profile-service ─────────────────────────────
+# Author display names for posts/comments used to come from the monolith's
+# local UserRepository (User.fullName). fullName now lives in
+# user-profile-service, so author-name resolution is done via the same
+# batch endpoint chat-service uses (GET /internal/profiles/names?ids=...).
+# See MICROSERVICES_PLAN.md §6 step 5c.
+services:
+  user-profile:
+    base-url: ${USER_PROFILE_SERVICE_URL:http://localhost:8082}
+  # Coming-soon roadmap item #3 (COMING_SOON_ROADMAP.md): notifies a post's
+  # author when someone comments on it. Best-effort, same pattern as
+  # order-service's NotificationClient — a failed notification must never
+  # break comment creation itself.
+  notification:
+    base-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8089}
+
+server:
+  port: 8088
+  address: 0.0.0.0

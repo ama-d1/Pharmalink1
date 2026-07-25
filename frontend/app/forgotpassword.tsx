@@ -9,27 +9,38 @@ import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
-import { API } from '@/constants/api';
+import { forgotPassword } from '@/services/authService';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
   const sendResetLink = async () => {
-    if (!email.trim()) return Alert.alert('Required', 'Please enter your email address.');
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setEmailError('Email is required.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmed)) {
+      setEmailError('Enter a valid email address.');
+      return;
+    }
+    setEmailError('');
     setLoading(true);
     try {
-      const response = await fetch(`${API.auth}/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      await response.text();
+      await forgotPassword(trimmed);
       setSent(true);
-    } catch {
-      Alert.alert('Error', 'Could not connect to server.');
+    } catch (err: any) {
+      if (err?.message === 'NETWORK_ERROR') {
+        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      } else {
+        Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
+      }
     } finally {
       setLoading(false);
     }
@@ -76,10 +87,11 @@ export default function ForgotPasswordScreen() {
                     label="Email address"
                     icon="mail-outline"
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={(t) => { setEmail(t); if (emailError) setEmailError(''); }}
                     placeholder="you@example.com"
                     keyboardType="email-address"
                     autoCapitalize="none"
+                    error={emailError}
                   />
                   <GlassButton label="Send Reset Link" onPress={sendResetLink} loading={loading} size="lg" />
                   <TouchableOpacity style={styles.backRow} onPress={() => router.back()}>

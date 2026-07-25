@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: pharmacy-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_pharmacy
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Phase 2 (MICROSERVICES_PLAN.md §6 step 9): Flyway now
+                                     # owns schema creation/changes (see db/migration/V1__init.sql
+                                     # and the flyway block below) — Hibernate only validates.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # ── Flyway ─────────────────────────────────────────────────
+  # Baseline (V1__init.sql) was hand-derived from this service's @Entity classes
+  # rather than pg_dump'ed from a live DB — see the migration file's header
+  # comment and MICROSERVICES_PLAN.md Phase 2 step 9 for that caveat.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+
+# Coming-soon roadmap item #2: ReviewController/ProfileClient resolve
+# reviewer display names via user-profile-service's batch endpoint, same
+# pattern as community-service's ProfileClient.
+services:
+  user-profile:
+    base-url: ${USER_PROFILE_SERVICE_URL:http://localhost:8082}
+
+# ── Paystack ───────────────────────────────────────────────────────────────
+# Added 2026-07-24 for real payment splitting — this service's own
+# PaystackClient (separate from payment-service's; no shared module in this
+# codebase) uses this to list banks, resolve account names, and create a
+# subaccount for a pharmacy. Same secret-key value as payment-service's
+# config (see PAYSTACK_SECRET_KEY in the root .env) — never logged or
+# returned in any response body.
+paystack:
+  secret-key: ${PAYSTACK_SECRET_KEY:}
+
+server:
+  port: 8084
+  address: 0.0.0.0
+  tomcat:
+    # Added 2026-07-23 — stock item photos are sent as a base64 JSON string
+    # in the POST /stock body (see PharmacyStock.imageBase64 javadoc), which
+    # is bigger than Tomcat's 2MB default post-size limit once encoded.
+    # Frontend also compresses/resizes before upload (see stock.tsx), so this
+    # is belt-and-suspenders headroom, not the only safeguard.
+    max-http-form-post-size: 10MB
+    max-swallow-size: 10MB

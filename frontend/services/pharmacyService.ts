@@ -1,4 +1,5 @@
 import { API } from '@/constants/api';
+import { getAuthHeaders } from '@/utils/authHeaders';
 
 const BASE = API.pharmacies;
 
@@ -24,6 +25,12 @@ export type Pharmacy = {
   distance?: number; // km, computed by backend for nearby/search calls
   isOpen?: boolean;
   verified: boolean;
+  // Added for task 63 (real nearby pharmacies via OpenStreetMap): only
+  // /nearby can return isRegistered=false/source="osm" rows — informational
+  // pins with no PharmaLink stock/checkout behind them, not yet on the
+  // platform. Every other endpoint always returns isRegistered=true.
+  isRegistered?: boolean;
+  source?: 'pharmalink' | 'osm';
 };
 
 export type PharmacySearchFilters = {
@@ -39,6 +46,17 @@ export type PharmacySearchParams = {
   query?: string;
   userLocation?: { latitude: number; longitude: number };
   filters?: PharmacySearchFilters;
+};
+
+export type PharmacyReview = {
+  id: string;
+  pharmacyId: string;
+  userId: string;
+  authorName: string;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 // ── API calls ──────────────────────────────────────────────────────────────────
@@ -59,7 +77,7 @@ export async function getPharmacies(filters?: PharmacySearchFilters): Promise<Ph
       if (filters.sortBy)    params.append('sortBy',    filters.sortBy);
     }
     const url = params.toString() ? `${BASE}?${params}` : BASE;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: await getAuthHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   } catch (err) {
@@ -73,7 +91,7 @@ export async function getPharmacies(filters?: PharmacySearchFilters): Promise<Ph
  */
 export async function getPharmacyById(id: string): Promise<Pharmacy | null> {
   try {
-    const res = await fetch(`${BASE}/${id}`);
+    const res = await fetch(`${BASE}/${id}`, { headers: await getAuthHeaders() });
     if (!res.ok) return null;
     return res.json();
   } catch (err) {
@@ -92,7 +110,9 @@ export async function getNearbyPharmacies(
   radius = 10,
 ): Promise<Pharmacy[]> {
   try {
-    const res = await fetch(`${BASE}/nearby?lat=${latitude}&lng=${longitude}&radius=${radius}`);
+    const res = await fetch(`${BASE}/nearby?lat=${latitude}&lng=${longitude}&radius=${radius}`, {
+      headers: await getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   } catch (err) {
@@ -109,7 +129,7 @@ export async function searchPharmacies(searchParams: PharmacySearchParams): Prom
   try {
     const res = await fetch(`${BASE}/search`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
       body: JSON.stringify({
         query: searchParams.query,
         userLocation: searchParams.userLocation,
@@ -121,5 +141,59 @@ export async function searchPharmacies(searchParams: PharmacySearchParams): Prom
   } catch (err) {
     console.warn('[pharmacyService] searchPharmacies failed:', err);
     return [];
+  }
+}
+
+/**
+ * GET /api/pharmacies/:id/reviews
+ * Coming-soon roadmap item #2 — public, no auth required to read reviews.
+ */
+export async function getPharmacyReviews(pharmacyId: string): Promise<PharmacyReview[]> {
+  try {
+    const res = await fetch(`${BASE}/${pharmacyId}/reviews`, { headers: await getAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } catch (err) {
+    console.warn('[pharmacyService] getPharmacyReviews failed:', err);
+    return [];
+  }
+}
+
+/**
+ * POST /api/pharmacies/:id/reviews
+ * Create-or-update: submitting again just edits your existing review for
+ * this pharmacy (one review per user per pharmacy, enforced server-side).
+ */
+export async function submitPharmacyReview(
+  pharmacyId: string,
+  rating: number,
+  comment: string,
+): Promise<PharmacyReview> {
+  const res = await fetch(`${BASE}/${pharmacyId}/reviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+    body: JSON.stringify({ rating, comment }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * DELETE /api/pharmacies/:id/reviews/:reviewId
+ * Backend enforces author-or-admin ownership — a 403 here means the
+ * frontend showed a delete button it shouldn't have (shouldn't happen,
+ * since it only ever renders on the caller's own review).
+ */
+export async function deletePharmacyReview(pharmacyId: string, reviewId: string): Promise<void> {
+  const res = await fetch(`${BASE}/${pharmacyId}/reviews/${reviewId}`, {
+    method: 'DELETE',
+    headers: await getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `HTTP ${res.status}`);
   }
 }

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.0.6</version>
+		<relativePath/>
+	</parent>
+
+	<groupId>com.pharmalink</groupId>
+	<artifactId>api-gateway</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>api-gateway</name>
+	<description>PharmaLink API Gateway — single public entry point. Routes to all 9 extracted services, validates JWTs issued by auth-service and forwards X-User-Id/X-User-Role/X-User-Email headers downstream. Owns no database.</description>
+
+	<properties>
+		<java.version>21</java.version>
+		<!--
+			FIXED: parent version above was pinned to 4.1.0, which is not an
+			actually released Spring Boot version (Maven Central only has
+			4.1.0-M1 through 4.1.0-RC1 as of this writing; there is no GA
+			4.1.0 yet). That mismatch broke the Docker build for every one
+			of the 13 services (they all had the same parent version):
+			Maven cannot resolve a nonexistent parent, which then cascades
+			into misleading "dependency version is missing" errors for
+			anything relying on inherited or imported dependency management
+			(like spring-cloud-starter-gateway below), even though the real
+			problem is the parent, not that dependency.
+			Verified directly against Maven Central
+			(repo1.maven.org, path org/springframework/boot/spring-boot-starter-parent/)
+			that 4.0.6 (released 2026-04-23) is the latest actual GA release,
+			and against the official Spring Cloud blog that the 2025.1.x
+			release train (this project uses 2025.1.2) is confirmed
+			compatible with Spring Boot 4.0.1 and every later 4.0.x release,
+			so 4.0.6 plus 2025.1.2 is a real, working combination, not a guess.
+		-->
+		<spring-cloud.version>2025.1.2</spring-cloud.version>
+	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<dependencies>
+		<!--
+			Spring Cloud Gateway is reactive (WebFlux-based) — deliberately
+			NOT paired with spring-boot-starter-web (servlet stack). Mixing
+			both webapp types in one service causes Spring Boot to fail
+			picking a single ApplicationContext type. This starter pulls in
+			spring-boot-starter-webflux + reactor-netty transitively.
+
+			FIXED: artifactId used to be spring-cloud-starter-gateway. In
+			this Spring Cloud release train (2025.1.2, gateway module
+			5.0.2), that classic starter no longer exists in the managed
+			dependency list at all — verified directly against the real
+			spring-cloud-gateway-dependencies:5.0.2 POM on Maven Central,
+			which only manages spring-cloud-starter-gateway-server-webflux
+			and spring-cloud-starter-gateway-server-webmvc. This is why the
+			build kept saying the version was "missing": it wasn't a typo
+			or a network issue, the old artifact genuinely isn't managed
+			by this BOM anymore. Using the webflux variant here since this
+			service is reactive, matching the comment above.
+		-->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
+		</dependency>
+		<!--
+			JWT parsing/validation only — deliberately not using Spring
+			Security (its reactive variant, spring-security-webflux, is a much
+			heavier dependency for what's a single custom GlobalFilter here).
+			Same jjwt version as auth-service, which issues these tokens.
+		-->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>0.12.6</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>0.12.6</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>0.12.6</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.projectreactor</groupId>
+			<artifactId>reactor-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>

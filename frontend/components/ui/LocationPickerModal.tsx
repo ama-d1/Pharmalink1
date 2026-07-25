@@ -15,12 +15,13 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
-import { 
-  LocationSuggestion, 
-  POPULAR_LOCATIONS, 
-  searchLocations, 
+import {
+  LocationSuggestion,
+  POPULAR_LOCATIONS,
+  searchLocations,
   getCurrentLocation,
-  getSavedLocations 
+  getSavedLocations,
+  reverseGeocode,
 } from '@/services/locationService';
 import { useAuth } from '@/context/AuthContext';
 
@@ -63,9 +64,40 @@ export function LocationPickerModal({
 
   const loadInitialData = async () => {
     try {
-      // Load GPS location
-      const currentGpsLocation = await getCurrentLocation();
-      setGpsLocation(currentGpsLocation);
+      // FIXED — this used to do `setGpsLocation(currentGpsLocation)` directly
+      // with the raw `{latitude, longitude}` getCurrentLocation() returns,
+      // even though gpsLocation is typed as a full LocationSuggestion (with
+      // .address/.name/.id). Tapping "Use Current Location" then called
+      // onSelect with an object missing all of those fields, so
+      // delivery.tsx's handleLocationSelect (`location.address`) silently
+      // set the address to undefined — this was the actual bug behind
+      // "auto-detect location doesn't work". Reverse-geocoding the raw
+      // coordinates into a real address before building the
+      // LocationSuggestion is what was missing.
+      const coords = await getCurrentLocation();
+      try {
+        const displayName = await reverseGeocode(coords.latitude, coords.longitude);
+        setGpsLocation({
+          id: 'gps-current',
+          name: 'Current Location',
+          address: displayName || `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`,
+          city: '',
+          region: '',
+          type: 'gps',
+        });
+      } catch {
+        // Reverse geocoding failed (e.g. no network reaching Nominatim) —
+        // still offer raw coordinates rather than nothing, since we do at
+        // least know where the user is.
+        setGpsLocation({
+          id: 'gps-current',
+          name: 'Current Location',
+          address: `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`,
+          city: '',
+          region: '',
+          type: 'gps',
+        });
+      }
 
       // Load saved locations if user is logged in
       if (user?.userId) {

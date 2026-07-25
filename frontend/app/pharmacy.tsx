@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PharmacyMap3D } from '@/components/3d/PharmacyMap3D';
@@ -19,6 +19,7 @@ import {
   PharmacySearchParams
 } from '@/services/pharmacyService';
 import { LocationSuggestion } from '@/services/locationService';
+import * as Location from 'expo-location';
 
 export default function PharmacyScreen() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function PharmacyScreen() {
   const [loading, setLoading] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [currentLocation, setCurrentLocation] = useState('Accra, Ghana');
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   
   // Filter states
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
@@ -49,9 +51,15 @@ export default function PharmacyScreen() {
     'Student Health'
   ];
 
-  useEffect(() => {
-    loadPharmacies();
-  }, []);
+ useEffect(() => {
+  // FIXED: this used to be followed by a second useEffect that independently
+  // re-requested location permission and called getCurrentPositionAsync again
+  // — loadPharmaciesNearMe() below already does both of those and calls
+  // setUserLocation itself, so the second effect was pure duplicate work and
+  // could pop the location permission dialog twice in a row on some Android
+  // versions. Removed.
+  loadPharmaciesNearMe();
+}, []);
 
   useEffect(() => {
     if (searchQuery.trim()) {
@@ -74,9 +82,43 @@ export default function PharmacyScreen() {
       setLoading(false);
     }
   };
+  const loadPharmaciesNearMe = async () => {
+  setLoading(true);
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      // No permission — fall back to the general list
+      await loadPharmacies();
+      return;
+    }
+    const loc = await Location.getCurrentPositionAsync({});
+    const { latitude, longitude } = loc.coords;
+    setUserLocation({ latitude, longitude });
+
+    const nearby = await getNearbyPharmacies(latitude, longitude, 10);
+    if (nearby.length > 0) {
+      setPharmacies(nearby);
+      setFilteredPharmacies(nearby);
+      setSelectedId(nearby[0].id);
+    } else {
+      // No pharmacies nearby — fall back to the general list
+      await loadPharmacies();
+    }
+  } catch (error) {
+    console.error('Error loading nearby pharmacies:', error);
+    await loadPharmacies();
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleSearch = async () => {
-    if (!searchQuery.trim() && selectedServices.length === 0) {
+    // Only skip the network round-trip when literally nothing is filtered —
+    // any active filter (including a non-default sort or "open now") needs to
+    // actually reach the backend, not just a text query or service selection.
+    const hasActiveFilters =
+      searchQuery.trim() || selectedServices.length > 0 || minRating > 0 || openNow || sortBy !== 'distance';
+    if (!hasActiveFilters) {
       setFilteredPharmacies(pharmacies);
       return;
     }
@@ -85,6 +127,7 @@ export default function PharmacyScreen() {
     try {
       const searchParams: PharmacySearchParams = {
         query: searchQuery,
+        userLocation: userLocation ?? undefined,
         filters: {
           location: currentLocation,
           services: selectedServices.length > 0 ? selectedServices : undefined,
@@ -121,15 +164,21 @@ export default function PharmacyScreen() {
       'This will use your GPS location to find the nearest pharmacies.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Use GPS', 
+        {
+          text: 'Use GPS',
           onPress: async () => {
             setLoading(true);
             try {
-              // In a real app, you'd get actual GPS coordinates
-              const mockLat = 5.6037; // Accra coordinates
-              const mockLng = -0.1870;
-              const nearbyPharmacies = await getNearbyPharmacies(mockLat, mockLng, 10);
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Location permission needed', 'Enable location access in your device settings to find nearby pharmacies.');
+                return;
+              }
+              const loc = await Location.getCurrentPositionAsync({});
+              const { latitude, longitude } = loc.coords;
+              setUserLocation({ latitude, longitude });
+
+              const nearbyPharmacies = await getNearbyPharmacies(latitude, longitude, 10);
               setFilteredPharmacies(nearbyPharmacies);
               if (nearbyPharmacies[0]) setSelectedId(nearbyPharmacies[0].id);
             } catch (error) {
@@ -145,10 +194,38 @@ export default function PharmacyScreen() {
 
   const handlePharmacyPress = (pharmacy: Pharmacy) => {
     setSelectedId(pharmacy.id);
+    // Pins sourced from OpenStreetMap (task 63) aren't PharmaLink pharmacies
+    // — no stock, no pharmacist account, nothing for pharmacy-details to
+    // load. Route those to a simple directions/call sheet instead of a
+    // details page that would just 404.
+    if (pharmacy.isRegistered === false) {
+      showUnregisteredPharmacyOptions(pharmacy);
+      return;
+    }
     router.push({
       pathname: '/pharmacy-details',
       params: { id: pharmacy.id }
     });
+  };
+
+  const showUnregisteredPharmacyOptions = (pharmacy: Pharmacy) => {
+    const buttons: any[] = [
+      { text: 'Close', style: 'cancel' },
+      {
+        text: 'Get Directions',
+        onPress: () => Linking.openURL(
+          `https://www.google.com/maps/dir/?api=1&destination=${pharmacy.latitude},${pharmacy.longitude}`
+        ),
+      },
+    ];
+    if (pharmacy.phone) {
+      buttons.push({ text: 'Call', onPress: () => Linking.openURL(`tel:${pharmacy.phone}`) });
+    }
+    Alert.alert(
+      pharmacy.name,
+      `${pharmacy.address}\n\nThis pharmacy isn't on PharmaLink yet, so ordering through the app isn't available here — but you can get directions or call ahead.`,
+      buttons
+    );
   };
 
   const toggleService = (service: string) => {
@@ -173,16 +250,18 @@ export default function PharmacyScreen() {
   };
 
   const mapPins = useMemo(
-    () =>
-      filteredPharmacies.map((p, i) => ({
+  () =>
+    filteredPharmacies
+      .filter((p) => p.latitude != null && p.longitude != null)
+      .map((p) => ({
         id: p.id,
         name: p.name,
-        x: 0.15 + (i % 4) * 0.22,
-        y: 0.25 + Math.floor(i / 4) * 0.35,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        isOpen: p.isOpen,
       })),
-    [filteredPharmacies]
-  );
-
+  [filteredPharmacies]
+);
   const selected = filteredPharmacies.find((p) => p.id === selectedId);
 
   return (
@@ -284,9 +363,14 @@ export default function PharmacyScreen() {
                         minRating === rating && styles.ratingBtnSelected
                       ]}
                     >
-                      <Text style={styles.ratingBtnText}>
-                        {rating === 0 ? 'Any' : `${rating}+ ⭐`}
-                      </Text>
+                      {rating === 0 ? (
+                        <Text style={styles.ratingBtnText}>Any</Text>
+                      ) : (
+                        <View style={styles.ratingBtnRow}>
+                          <Ionicons name="star" size={12} color={GlassTheme.colors.amber} />
+                          <Text style={styles.ratingBtnText}>{rating}+</Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -329,9 +413,10 @@ export default function PharmacyScreen() {
               </View>
 
               <View style={styles.filterActions}>
-                <GlassButton 
-                  label="Clear All" 
+                <GlassButton
+                  label="Clear All"
                   onPress={clearFilters}
+                  variant="outline"
                   style={styles.clearBtn}
                 />
                 <GlassButton 
@@ -349,7 +434,12 @@ export default function PharmacyScreen() {
           </Text>
 
           {/* 3D Map */}
-          <PharmacyMap3D pharmacies={mapPins} selectedId={selectedId} />
+         <PharmacyMap3D
+  pharmacies={mapPins}
+  selectedId={selectedId}
+  onSelect={setSelectedId}
+  userLocation={userLocation}
+/>
 
           {/* Selected Pharmacy Info */}
           {selected && (
@@ -364,21 +454,29 @@ export default function PharmacyScreen() {
                 </View>
                 {selected.verified && (
                   <View style={styles.verifiedBadge}>
-                    <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                    <Ionicons name="checkmark-circle" size={16} color={GlassTheme.colors.success} />
                     <Text style={styles.verifiedText}>Verified</Text>
                   </View>
                 )}
+                {selected.isRegistered === false && (
+                  <View style={styles.verifiedBadge}>
+                    <Ionicons name="information-circle" size={16} color={GlassTheme.colors.textMuted} />
+                    <Text style={[styles.verifiedText, { color: GlassTheme.colors.textMuted }]}>Not on PharmaLink</Text>
+                  </View>
+                )}
               </View>
-              
+
               <View style={styles.metaRow}>
                 <View style={styles.metaItem}>
                   <Ionicons name="time-outline" size={14} color={GlassTheme.colors.accent} />
                   <Text style={styles.metaText}>{selected.openHours}</Text>
                 </View>
-                <View style={styles.metaItem}>
-                  <Ionicons name="star" size={14} color={GlassTheme.colors.amber} />
-                  <Text style={styles.metaText}>{selected.rating} ({selected.reviewCount})</Text>
-                </View>
+                {selected.isRegistered !== false && (
+                  <View style={styles.metaItem}>
+                    <Ionicons name="star" size={14} color={GlassTheme.colors.amber} />
+                    <Text style={styles.metaText}>{selected.rating} ({selected.reviewCount})</Text>
+                  </View>
+                )}
                 {selected.distance && (
                   <View style={styles.metaItem}>
                     <Ionicons name="location" size={14} color={GlassTheme.colors.accent} />
@@ -422,18 +520,22 @@ export default function PharmacyScreen() {
                     <View style={styles.pharmacyHeader}>
                       <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
                       {pharmacy.verified && (
-                        <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                        <Ionicons name="checkmark-circle" size={14} color={GlassTheme.colors.success} />
                       )}
-                      {!pharmacy.isOpen && (
+                      {pharmacy.isRegistered === false ? (
+                        <Text style={styles.notOnAppBadge}>Not on PharmaLink</Text>
+                      ) : !pharmacy.isOpen && (
                         <Text style={styles.closedBadge}>Closed</Text>
                       )}
                     </View>
                     <Text style={styles.pharmacyAddr}>{pharmacy.address}</Text>
                     <View style={styles.pharmacyMeta}>
-                      <View style={styles.ratingContainer}>
-                        <Ionicons name="star" size={12} color={GlassTheme.colors.amber} />
-                        <Text style={styles.ratingText}>{pharmacy.rating}</Text>
-                      </View>
+                      {pharmacy.isRegistered !== false && (
+                        <View style={styles.ratingContainer}>
+                          <Ionicons name="star" size={12} color={GlassTheme.colors.amber} />
+                          <Text style={styles.ratingText}>{pharmacy.rating}</Text>
+                        </View>
+                      )}
                       {pharmacy.distance && (
                         <Text style={styles.distanceText}>{pharmacy.distance}km</Text>
                       )}
@@ -491,7 +593,7 @@ const styles = StyleSheet.create({
   },
   nearbyBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     alignItems: 'center', justifyContent: 'center',
   },
   content: { padding: 20, paddingBottom: 40, gap: 14 },
@@ -505,7 +607,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)' on the flat light background
     borderRadius: 12,
   },
   locationText: {
@@ -518,12 +620,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
     borderRadius: 12,
     position: 'relative',
   },
   filterBtnActive: {
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     borderColor: GlassTheme.colors.accent,
   },
   filterText: {
@@ -570,13 +672,13 @@ const styles = StyleSheet.create({
   serviceChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   serviceChipSelected: {
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     borderColor: GlassTheme.colors.accent,
   },
   serviceChipText: {
@@ -591,11 +693,16 @@ const styles = StyleSheet.create({
   ratingBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
     borderRadius: 8,
   },
   ratingBtnSelected: {
     backgroundColor: GlassTheme.colors.accent,
+  },
+  ratingBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   ratingBtnText: {
     color: GlassTheme.colors.text,
@@ -610,7 +717,12 @@ const styles = StyleSheet.create({
   toggle: {
     width: 44,
     height: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    // FIXED — was near-invisible 'rgba(255,255,255,0.2)' on the flat
+    // light background, so the "off" toggle track barely read as a
+    // track at all. divider is the app's real flat neutral color, giving
+    // the off-state a visible resting surface distinct from the accent
+    // used for the on-state right below.
+    backgroundColor: GlassTheme.colors.divider,
     borderRadius: 12,
     padding: 2,
   },
@@ -630,7 +742,7 @@ const styles = StyleSheet.create({
   sortBtn: {
     flex: 1,
     paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
     borderRadius: 8,
     alignItems: 'center',
   },
@@ -647,9 +759,15 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 8,
   },
+  // FIXED — this previously set an inline `backgroundColor:
+  // 'rgba(255,255,255,0.1)'` on a GlassButton using its default
+  // variant="primary", which paints an opaque gradient over the whole
+  // surface — so the override was fully hidden and did nothing (same
+  // dead-code pattern found and fixed in order.tsx's "Review Cart"
+  // button). Real fix is the `variant="outline"` prop added at the call
+  // site; this style now only needs the layout flex, not a fake color.
   clearBtn: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   applyBtn: {
     flex: 1,
@@ -690,13 +808,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    backgroundColor: GlassTheme.colors.successLight, // FIXED — hardcoded 'rgba(16, 185, 129, 0.1)'
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
   },
   verifiedText: {
-    color: '#10B981',
+    color: GlassTheme.colors.success, // FIXED — hardcoded '#10B981'
     fontSize: 10,
     fontWeight: '600',
   },
@@ -722,7 +840,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   serviceTag: {
-    backgroundColor: 'rgba(20,184,166,0.1)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.1)'
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -757,7 +875,7 @@ const styles = StyleSheet.create({
   },
   pharmacyIcon: {
     width: 44, height: 44, borderRadius: 14,
-    backgroundColor: 'rgba(20,184,166,0.2)',
+    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
     alignItems: 'center', justifyContent: 'center',
   },
   pharmacyInfo: { flex: 1 },
@@ -774,10 +892,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   closedBadge: {
-    color: '#EF4444',
+    color: GlassTheme.colors.danger, // FIXED — hardcoded '#EF4444'
     fontSize: 10,
     fontWeight: '600',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: GlassTheme.colors.dangerLight, // FIXED — hardcoded 'rgba(239, 68, 68, 0.1)'
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  // Added for task 63 — flags OpenStreetMap-sourced pins (not yet a
+  // PharmaLink pharmacy) so users don't expect to be able to order there.
+  notOnAppBadge: {
+    color: GlassTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '600',
+    backgroundColor: GlassTheme.colors.surfaceAlt,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,

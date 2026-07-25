@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: admin-service
+  # No datasource — this service owns no database (MICROSERVICES_PLAN.md §2
+  # row 12). Everything is aggregated live from other services.
+
+# ── Cross-service calls ──────────────────────────────────────────────────────
+# All of these hit /internal/** endpoints except pharmacy reads, which reuse
+# the existing public pharmacy-listing endpoint (non-sensitive data, no need
+# to duplicate it internally).
+services:
+  auth:
+    base-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  user-profile:
+    base-url: ${USER_PROFILE_SERVICE_URL:http://localhost:8082}
+  pharmacy:
+    base-url: ${PHARMACY_SERVICE_URL:http://localhost:8084}
+  order:
+    base-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+  community:
+    base-url: ${COMMUNITY_SERVICE_URL:http://localhost:8088}
+
+server:
+  port: 8091
+  address: 0.0.0.0
