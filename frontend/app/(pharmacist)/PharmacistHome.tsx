@@ -98,7 +98,7 @@ export default function PharmacistHome() {
 
   return (
     <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
         {loading ? (
           <ActivityIndicator style={{ marginTop: 80 }} color={GlassTheme.colors.primary} />
         ) : !pharmacyId ? (

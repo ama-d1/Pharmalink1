@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -37,19 +37,8 @@ function computeAnalytics(orders: AdminOrder[], pharmacies: AdminPharmacy[]) {
   return { revenue, verifiedPharmacies, unverifiedPharmacies, ordersByStatus };
 }
 
-type Section = {
-  key: string;
-  title: string;
-  subtitle: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  route: string;
-  count: number;
-};
-
 export default function AdminHome() {
-  const router = useRouter();
-  const { user, clearSession, getFirstName } = useAuth();
+  const { clearSession, getFirstName } = useAuth();
   const [counts, setCounts] = useState({ users: 0, pharmacies: 0, orders: 0, reports: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
@@ -92,49 +81,27 @@ export default function AdminHome() {
     setRefreshing(false);
   };
 
-  const handleLogout = async () => {
-    await clearSession();
-    router.replace('/admin-login' as any);
+  const handleLogout = () => {
+    Alert.alert('Log out', 'Are you sure you want to log out of the admin dashboard?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        // FIXED — this used to call router.replace('/admin-login') itself
+        // right after clearSession(). But clearSession() sets `user` to null
+        // synchronously, and (admin)/_layout.tsx's own guard useEffect
+        // ALSO watches `user` and redirects to /admin-login the moment it
+        // goes null — so tapping "Log out" fired two competing navigations
+        // to the same screen back to back, which is what made it feel like
+        // it "didn't work well" (a visible stutter/flash, sometimes
+        // appearing to not respond at all on slower devices). Only clearing
+        // the session here and letting the layout's guard be the single
+        // place that actually navigates fixes that — one clear cause, one
+        // clear effect.
+        onPress: () => { clearSession(); },
+      },
+    ]);
   };
-
-  const sections: Section[] = [
-    {
-      key: 'users',
-      title: 'User Management',
-      subtitle: 'Search, disable, or promote accounts',
-      icon: 'people-outline',
-      color: GlassTheme.colors.primary,
-      route: '/(admin)/users',
-      count: counts.users,
-    },
-    {
-      key: 'pharmacies',
-      title: 'Pharmacy Management',
-      subtitle: 'Add, verify, and manage listings',
-      icon: 'medkit-outline',
-      color: GlassTheme.colors.accent,
-      route: '/(admin)/pharmacies',
-      count: counts.pharmacies,
-    },
-    {
-      key: 'orders',
-      title: 'Order Oversight',
-      subtitle: 'Monitor orders and payment status',
-      icon: 'cart-outline',
-      color: GlassTheme.colors.amber,
-      route: '/(admin)/orders',
-      count: counts.orders,
-    },
-    {
-      key: 'moderation',
-      title: 'Community Moderation',
-      subtitle: 'Review reported posts & comments',
-      icon: 'shield-checkmark-outline',
-      color: GlassTheme.colors.violet,
-      route: '/(admin)/moderation',
-      count: counts.reports,
-    },
-  ];
 
   const totalOrdersForBars = Object.values(analytics.ordersByStatus).reduce((a, b) => a + b, 0) || 1;
   const STATUS_COLOR: Record<string, string> = {
@@ -147,7 +114,24 @@ export default function AdminHome() {
 
   return (
     <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        {/* ── Top Header (fixed, outside the ScrollView) ── */}
+        {/* Pulled out of the scroll content so it's always on-screen the
+            instant the tab opens — no scrolling required to see "Admin
+            Portal / Hi, {name}" or reach the logout button. Same visual
+            treatment as before (plain row matching the patient home
+            dashboard's header), just pinned above the scrollable analytics
+            instead of being the first item inside them. */}
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>Admin Portal</Text>
+            <Text style={styles.title}>Hi, {getFirstName()}</Text>
+          </View>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
+            <Ionicons name="log-out-outline" size={20} color={GlassTheme.colors.primary} />
+          </TouchableOpacity>
+        </View>
+
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
@@ -159,15 +143,6 @@ export default function AdminHome() {
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
-            <View style={styles.heroTop}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.eyebrow}>Admin Portal</Text>
-                <Text style={styles.title}>Hi, {getFirstName()}</Text>
-              </View>
-              <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                <Ionicons name="log-out-outline" size={19} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
             <View style={styles.heroStatRow}>
               <View style={styles.heroStat}>
                 <Text style={styles.heroStatValue}>GHS {analytics.revenue.toFixed(0)}</Text>
@@ -185,23 +160,6 @@ export default function AdminHome() {
               </View>
             </View>
           </LinearGradient>
-
-          <Text style={styles.sectionHeading}>Manage</Text>
-          <View style={styles.grid}>
-            {sections.map((s) => (
-              <GlassCard key={s.key} style={styles.sectionCard} variant="flat" onPress={() => router.push(s.route as any)}>
-                <View style={styles.sectionCardTop}>
-                  <View style={[styles.iconWrap, { backgroundColor: `${s.color}16` }]}>
-                    <Ionicons name={s.icon} size={22} color={s.color} />
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={GlassTheme.colors.textDim} />
-                </View>
-                <Text style={styles.sectionCount}>{s.count}</Text>
-                <Text style={styles.sectionTitle}>{s.title}</Text>
-                <Text style={styles.sectionSubtitle}>{s.subtitle}</Text>
-              </GlassCard>
-            ))}
-          </View>
 
           <Text style={styles.sectionHeading}>Pharmacy verification</Text>
           <View style={styles.tileRow}>
@@ -255,19 +213,26 @@ export default function AdminHome() {
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 20, paddingBottom: 40, gap: 20 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 110, gap: 20 },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  eyebrow: { fontSize: 12, fontWeight: '700', color: GlassTheme.colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase' },
+  title: { fontSize: 26, fontWeight: '800', color: GlassTheme.colors.text, marginTop: 2 },
+  logoutBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
   hero: {
     marginHorizontal: -20, paddingHorizontal: 20,
-    paddingTop: 16, paddingBottom: 22, gap: 18,
+    paddingTop: 20, paddingBottom: 22, gap: 18,
     borderBottomLeftRadius: 28, borderBottomRightRadius: 28,
-  },
-  heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  eyebrow: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.75)', letterSpacing: 0.5, textTransform: 'uppercase' },
-  title: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', marginTop: 4 },
-  logoutBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    alignItems: 'center', justifyContent: 'center',
   },
   heroStatRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: GlassTheme.radius.lg, paddingVertical: 14 },
   heroStat: { flex: 1, alignItems: 'center', gap: 2 },
@@ -275,16 +240,6 @@ const styles = StyleSheet.create({
   heroStatLabel: { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   heroDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.2)' },
   sectionHeading: { fontSize: 15, fontWeight: '800', color: GlassTheme.colors.text, marginTop: 2 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: -8 },
-  sectionCard: { width: '47%', gap: 6 },
-  sectionCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  iconWrap: {
-    width: 42, height: 42, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  sectionCount: { fontSize: 22, fontWeight: '800', color: GlassTheme.colors.text, marginTop: 2 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
-  sectionSubtitle: { fontSize: 11, color: GlassTheme.colors.textMuted, lineHeight: 15 },
   noteRow: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingVertical: 8 },
   noteText: { flex: 1, fontSize: 12, color: GlassTheme.colors.textMuted, lineHeight: 17 },
   tileRow: { flexDirection: 'row', gap: 12, marginTop: -8 },

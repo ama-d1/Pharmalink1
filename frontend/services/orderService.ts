@@ -43,6 +43,19 @@ export async function createOrder(
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ userId, items, deliveryAddress, paymentMethod, pharmacyId, fulfillmentType, deliveryFee }),
   });
+  // FIXED — this used to call res.json() unconditionally, even on a
+  // non-2xx response. That meant a real backend failure (validation error,
+  // 500, etc.) got silently parsed as if it were a valid Order — `order.id`
+  // would just be undefined — and the actual problem only surfaced one step
+  // later as a confusing, unrelated-looking failure from
+  // initializePayment(undefined, ...). Checking res.ok here and surfacing
+  // the backend's real message (same convention as every other service call
+  // in this file) means a failed order creation now fails LOUDLY, at the
+  // point it actually happened, with the real reason.
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `Could not create order (${res.status})`);
+  }
   return res.json();
 }
 

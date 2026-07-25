@@ -178,7 +178,7 @@ export default function DriverHome() {
 
   return (
     <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
         <LinearGradient
           colors={GlassTheme.gradients.headerBg}
           style={styles.hero}

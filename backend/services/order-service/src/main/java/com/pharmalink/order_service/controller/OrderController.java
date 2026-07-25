@@ -37,7 +37,21 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<?> createOrder(@RequestBody OrderRequest request, HttpServletRequest httpRequest) {
         if (!AuthContext.isOwnerOrAdmin(httpRequest, request.getUserId())) return forbidden();
-        return ResponseEntity.ok(orderService.createOrder(request));
+        // FIXED — this had no exception handling, unlike the rest of this
+        // codebase's mutating endpoints (see e.g. chat-service's
+        // ChatController.sendMessage). Without it, any failure here (a null
+        // items list, an invalid fulfillmentType string failing
+        // FulfillmentType.valueOf(), a DB error, etc.) fell through to Spring
+        // Boot's default /error handler, which returns "message": "No
+        // message available" (server.error.include-message defaults to
+        // "never" and isn't set here) — leaving the frontend with nothing
+        // useful to show and no way to tell what actually went wrong at the
+        // very first step of checkout.
+        try {
+            return ResponseEntity.ok(orderService.createOrder(request));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @PostMapping("/{orderId}/pay")

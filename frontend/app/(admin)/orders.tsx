@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,7 +18,6 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 export default function AdminOrdersScreen() {
-  const router = useRouter();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,10 +42,13 @@ export default function AdminOrdersScreen() {
     <GlassBackground>
       <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Order Oversight</Text>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="cart" size={20} color={GlassTheme.colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>Order Oversight</Text>
+            <Text style={styles.headerSubtitle}>Monitor orders and payment status</Text>
+          </View>
         </View>
 
         {loading ? (
@@ -100,10 +102,11 @@ export default function AdminOrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text },
-  list: { padding: 16, gap: 12, paddingTop: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, paddingBottom: 12 },
+  headerIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: GlassTheme.colors.text },
+  headerSubtitle: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
+  list: { padding: 16, gap: 12, paddingTop: 4, paddingBottom: 100 },
   orderCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   orderId: { fontSize: 15, fontWeight: '700', color: GlassTheme.colors.text },
   orderMeta: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },

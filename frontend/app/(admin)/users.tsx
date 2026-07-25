@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,7 +17,6 @@ import { AdminPharmacy, AdminUser, getAllPharmaciesAdmin, getAllUsers, setUserRo
 const ROLE_CYCLE: AdminUser['role'][] = ['PATIENT', 'PHARMACIST', 'ADMIN', 'DRIVER'];
 
 export default function AdminUsersScreen() {
-  const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -86,10 +85,17 @@ export default function AdminUsersScreen() {
     }
   };
 
+  // Closes the (single) picker modal and resets BOTH step states together,
+  // so it can never be left half-open on one step's state.
+  const closePicker = () => {
+    setPickerUser(null);
+    setPendingPharmacy(null);
+  };
+
   const assignPharmacy = (pharmacy: AdminPharmacy) => {
-    // Don't call the API yet — hold the pharmacy choice and open the
-    // Owner/Manager tier picker next; assignPharmacyRole() below finishes
-    // the job once a tier is picked.
+    // Don't call the API yet — hold the pharmacy choice, which flips the
+    // single modal to its Owner/Manager step; assignPharmacyRole() below
+    // finishes the job once a tier is picked.
     setPendingPharmacy(pharmacy);
   };
 
@@ -112,10 +118,13 @@ export default function AdminUsersScreen() {
     <GlassBackground>
       <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>User Management</Text>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="people" size={20} color={GlassTheme.colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>User Management</Text>
+            <Text style={styles.headerSubtitle}>Search, disable, or promote accounts</Text>
+          </View>
         </View>
 
         <View style={styles.searchWrap}>
@@ -175,48 +184,60 @@ export default function AdminUsersScreen() {
           />
         )}
 
-        <Modal visible={!!pickerUser} transparent animationType="fade" onRequestClose={() => setPickerUser(null)}>
+        {/* FIXED — this used to be TWO separate <Modal> components: one for
+            picking a pharmacy, a second for picking Owner/Manager. Picking a
+            pharmacy set pendingPharmacy WITHOUT closing the first modal, so
+            for a moment both modals were `visible` at once. Presenting two
+            native modals simultaneously is a known iOS React Native deadlock
+            — the whole screen locks up and stops responding to touches,
+            which is exactly the "screen freezes when changing a role" report.
+            Collapsed into a SINGLE modal that switches between the two steps
+            internally (pharmacy list when no pendingPharmacy, tier picker
+            once one is chosen), so only one native modal is ever mounted. */}
+        <Modal visible={!!pickerUser} transparent animationType="fade" onRequestClose={closePicker}>
           <View style={styles.modalOverlay}>
             <GlassCard style={styles.pickerCard}>
-              <Text style={styles.pickerTitle}>Assign a pharmacy for {pickerUser?.fullName}</Text>
-              <FlatList
-                data={pharmacies}
-                keyExtractor={(p) => p.id}
-                style={{ maxHeight: 320 }}
-                ListEmptyComponent={
-                  <Text style={styles.emptyText}>No pharmacies found — add one under Pharmacies first.</Text>
-                }
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.pickerRow} onPress={() => assignPharmacy(item)}>
-                    <Text style={styles.pickerRowName}>{item.name}</Text>
-                    {!!item.address && <Text style={styles.pickerRowAddress}>{item.address}</Text>}
+              {!pendingPharmacy ? (
+                <>
+                  <Text style={styles.pickerTitle}>Assign a pharmacy for {pickerUser?.fullName}</Text>
+                  <FlatList
+                    data={pharmacies}
+                    keyExtractor={(p) => p.id}
+                    style={{ maxHeight: 320 }}
+                    ListEmptyComponent={
+                      <Text style={styles.emptyText}>No pharmacies found — add one under Pharmacies first.</Text>
+                    }
+                    renderItem={({ item }) => (
+                      <TouchableOpacity style={styles.pickerRow} onPress={() => assignPharmacy(item)}>
+                        <Text style={styles.pickerRowName}>{item.name}</Text>
+                        {!!item.address && <Text style={styles.pickerRowAddress}>{item.address}</Text>}
+                      </TouchableOpacity>
+                    )}
+                  />
+                  <TouchableOpacity style={styles.pickerCancel} onPress={closePicker}>
+                    <Text style={styles.pickerCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                )}
-              />
-              <TouchableOpacity style={styles.pickerCancel} onPress={() => setPickerUser(null)}>
-                <Text style={styles.pickerCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </GlassCard>
-          </View>
-        </Modal>
-
-        <Modal visible={!!pendingPharmacy} transparent animationType="fade" onRequestClose={() => setPendingPharmacy(null)}>
-          <View style={styles.modalOverlay}>
-            <GlassCard style={styles.pickerCard}>
-              <Text style={styles.pickerTitle}>
-                Is {pickerUser?.fullName} the owner or a manager at {pendingPharmacy?.name}?
-              </Text>
-              <TouchableOpacity style={styles.pickerRow} onPress={() => assignPharmacyRole('OWNER')}>
-                <Text style={styles.pickerRowName}>Owner</Text>
-                <Text style={styles.pickerRowAddress}>Runs this pharmacy's account</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.pickerRow, { borderBottomWidth: 0 }]} onPress={() => assignPharmacyRole('MANAGER')}>
-                <Text style={styles.pickerRowName}>Manager</Text>
-                <Text style={styles.pickerRowAddress}>Staff account under the owner</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.pickerCancel} onPress={() => setPendingPharmacy(null)}>
-                <Text style={styles.pickerCancelText}>Cancel</Text>
-              </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.pickerTitle}>
+                    Is {pickerUser?.fullName} the owner or a manager at {pendingPharmacy?.name}?
+                  </Text>
+                  <TouchableOpacity style={styles.pickerRow} onPress={() => assignPharmacyRole('OWNER')}>
+                    <Text style={styles.pickerRowName}>Owner</Text>
+                    <Text style={styles.pickerRowAddress}>Runs this pharmacy's account</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.pickerRow, { borderBottomWidth: 0 }]} onPress={() => assignPharmacyRole('MANAGER')}>
+                    <Text style={styles.pickerRowName}>Manager</Text>
+                    <Text style={styles.pickerRowAddress}>Staff account under the owner</Text>
+                  </TouchableOpacity>
+                  {/* Back to the pharmacy list rather than cancelling outright,
+                      in case the admin picked the wrong pharmacy. */}
+                  <TouchableOpacity style={styles.pickerCancel} onPress={() => setPendingPharmacy(null)}>
+                    <Text style={styles.pickerCancelText}>Back</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </GlassCard>
           </View>
         </Modal>
@@ -226,11 +247,12 @@ export default function AdminUsersScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, paddingBottom: 12 },
+  headerIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: GlassTheme.colors.text },
+  headerSubtitle: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
   searchWrap: { paddingHorizontal: 16 },
-  list: { padding: 16, gap: 12, paddingTop: 4 },
+  list: { padding: 16, gap: 12, paddingTop: 4, paddingBottom: 100 },
   userCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   userName: { fontSize: 15, fontWeight: '700', color: GlassTheme.colors.text },
   userEmail: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },

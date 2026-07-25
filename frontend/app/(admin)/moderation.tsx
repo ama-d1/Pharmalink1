@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,7 +10,6 @@ import { GlassTheme } from '@/constants/glassTheme';
 import { AdminReportedPost, getReportedPosts, removePost } from '@/services/adminService';
 
 export default function AdminModerationScreen() {
-  const router = useRouter();
   const [posts, setPosts] = useState<AdminReportedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -51,10 +50,13 @@ export default function AdminModerationScreen() {
     <GlassBackground>
       <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Community Moderation</Text>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="shield-checkmark" size={20} color={GlassTheme.colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>Community Moderation</Text>
+            <Text style={styles.headerSubtitle}>Review reported posts & comments</Text>
+          </View>
         </View>
 
         {loading ? (
@@ -99,10 +101,11 @@ export default function AdminModerationScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text },
-  list: { padding: 16, gap: 12, paddingTop: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, paddingBottom: 12 },
+  headerIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: GlassTheme.colors.text },
+  headerSubtitle: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
+  list: { padding: 16, gap: 12, paddingTop: 4, paddingBottom: 100 },
   postCard: { gap: 8 },
   postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   postAuthor: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text },
