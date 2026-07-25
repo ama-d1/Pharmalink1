@@ -31,3 +31,8 @@ package-lock.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Third-party downloaded binary (Cloudflare Tunnel client), not project
+# source -- ~52MB and not something a repo should carry. See
+# REPO_STRUCTURE.md's tooling section for what it's for / how to get it.
+cloudflared.exe
