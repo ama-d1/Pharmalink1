@@ -1,0 +1,39 @@
+# Caddy config for the production overlay (docker-compose.prod.yml).
+#
+# SITE_ADDRESS comes from .env — either <server-ip>.sslip.io or a real
+# domain. Naming the host here (rather than using :443) is what tells Caddy
+# to provision a Let's Encrypt certificate for it automatically.
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# Everything goes to api-gateway, which owns all routing (see its
+	# application.yaml). Caddy is deliberately dumb here: putting path rules
+	# in two places is how they drift apart.
+	#
+	# WebSocket upgrades need no special handling — reverse_proxy passes
+	# Connection/Upgrade through natively, so chat's /ws endpoint works over
+	# wss:// with nothing extra. Getting this wrong is the classic reason
+	# chat works locally and dies behind a proxy.
+	reverse_proxy api-gateway:8080 {
+		# Without these the gateway sees Caddy's container IP as the client
+		# and http as the scheme, which breaks anything generating absolute
+		# URLs — notably the Paystack payment callback redirect.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Chat media and prescription images are sent as base64 inside JSON
+	# bodies (see frontend fileToDataUri), so request bodies are far larger
+	# than a typical REST API's. Caddy's default cap would reject them.
+	request_body {
+		max_size 25MB
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MB
+			roll_keep 5
+		}
+	}
+}

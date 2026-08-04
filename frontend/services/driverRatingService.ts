@@ -5,7 +5,8 @@ import { getAuthHeaders } from '@/utils/authHeaders';
 // review functions in style (upsert-by-user, backend error message
 // surfaced via body.message on failure).
 
-const BASE = API.delivery;
+// API.delivery is read at call time — see constants/api.ts on why the URL
+// must not be captured in a module-level const.
 
 export type DriverRating = {
   id: string;
@@ -24,7 +25,7 @@ export type DriverRating = {
  * null (backend responds 200 with {rating: null}, not 404).
  */
 export async function getDriverRatingForDelivery(deliveryId: string): Promise<DriverRating | null> {
-  const res = await fetch(`${BASE}/${deliveryId}/rating`, { headers: await getAuthHeaders() });
+  const res = await fetch(`${API.delivery}/${deliveryId}/rating`, { headers: await getAuthHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.message || `HTTP ${res.status}`);
@@ -43,7 +44,7 @@ export async function submitDriverRating(
   rating: number,
   comment: string,
 ): Promise<DriverRating> {
-  const res = await fetch(`${BASE}/${deliveryId}/rating`, {
+  const res = await fetch(`${API.delivery}/${deliveryId}/rating`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ rating, comment }),

@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Modal,
   View,
   Text,
   TouchableOpacity,
-  ScrollView,
   StyleSheet,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
+import { AppBottomSheet } from '@/components/ui/BottomSheet';
 import {
   LocationSuggestion,
   POPULAR_LOCATIONS,
@@ -105,17 +101,23 @@ export function LocationPickerModal({
         setSavedLocations(saved);
       }
 
-      // Load recent locations from storage (mock for now)
-      setRecentLocations([
-        {
-          id: 'recent-1',
-          name: 'Last used location',
-          address: currentLocation || 'East Legon, Accra',
-          city: 'Accra',
-          region: 'Greater Accra',
-          type: 'recent'
-        }
-      ]);
+      // "Recent" is really just the address the opening screen already has —
+      // there's no recents store yet. It used to fall back to a hardcoded
+      // 'East Legon, Accra' when the caller had none, which presented an
+      // invented address as somewhere the user had actually chosen before.
+      // No address in, no row out.
+      setRecentLocations(
+        currentLocation?.trim()
+          ? [{
+              id: 'recent-1',
+              name: 'Current selection',
+              address: currentLocation,
+              city: '',
+              region: '',
+              type: 'recent',
+            }]
+          : []
+      );
     } catch (error) {
       console.error('Error loading location data:', error);
     }
@@ -188,149 +190,108 @@ export function LocationPickerModal({
   );
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <GlassBackground>
-        <SafeAreaView style={{ flex: 1 }}>
-          <View style={styles.header}>
-            <TouchableOpacity onPress={onClose} style={styles.backBtn}>
-              <Ionicons name="close" size={22} color={GlassTheme.colors.text} />
-            </TouchableOpacity>
-            <Text style={styles.title}>{title}</Text>
-            <View style={styles.placeholder} />
-          </View>
+    <AppBottomSheet visible={visible} onClose={onClose} title={title} scrollable snapPoints={['65%', '92%']}>
+      {/* Search */}
+      <View style={styles.searchSection}>
+        <GlassInput
+          placeholder="Search for a location..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          icon="search"
+          style={styles.searchInput}
+        />
+        {isSearching && (
+          <Text style={styles.searchingText}>Searching...</Text>
+        )}
+      </View>
 
-          <ScrollView contentContainerStyle={styles.content}>
-            {/* Search */}
-            <View style={styles.searchSection}>
-              <GlassInput
-                placeholder="Search for a location..."
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                icon="search"
-                style={styles.searchInput}
-              />
-              {isSearching && (
-                <Text style={styles.searchingText}>Searching...</Text>
-              )}
+      {/* GPS Location */}
+      <GlassCard style={styles.gpsCard}>
+        <TouchableOpacity onPress={handleUseGPS} style={styles.gpsContent}>
+          <View style={styles.gpsLeft}>
+            <View style={styles.gpsIcon}>
+              <Ionicons name="locate" size={20} color={GlassTheme.colors.accent} />
             </View>
+            <View>
+              <Text style={styles.gpsTitle}>Use Current Location</Text>
+              <Text style={styles.gpsSubtitle}>Use GPS to detect your location</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={GlassTheme.colors.textMuted} />
+        </TouchableOpacity>
+      </GlassCard>
 
-            {/* GPS Location */}
-            <GlassCard style={styles.gpsCard}>
-              <TouchableOpacity onPress={handleUseGPS} style={styles.gpsContent}>
-                <View style={styles.gpsLeft}>
-                  <View style={styles.gpsIcon}>
-                    <Ionicons name="locate" size={20} color={GlassTheme.colors.accent} />
-                  </View>
-                  <View>
-                    <Text style={styles.gpsTitle}>Use Current Location</Text>
-                    <Text style={styles.gpsSubtitle}>Use GPS to detect your location</Text>
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={GlassTheme.colors.textMuted} />
-              </TouchableOpacity>
-            </GlassCard>
+      {/* Search Results */}
+      {searchQuery && suggestions.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Search Results</Text>
+          {suggestions.map((location) => (
+            <LocationItem
+              key={location.id}
+              location={location}
+              icon="location"
+            />
+          ))}
+        </>
+      )}
 
-            {/* Search Results */}
-            {searchQuery && suggestions.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Search Results</Text>
-                {suggestions.map((location) => (
-                  <LocationItem 
-                    key={location.id} 
-                    location={location} 
-                    icon="location" 
-                  />
-                ))}
-              </>
-            )}
+      {/* No Results */}
+      {searchQuery && suggestions.length === 0 && !isSearching && (
+        <GlassCard style={styles.noResultsCard}>
+          <Ionicons name="search" size={32} color={GlassTheme.colors.textMuted} />
+          <Text style={styles.noResultsTitle}>No locations found</Text>
+          <Text style={styles.noResultsText}>
+            Try a different search term or check your spelling
+          </Text>
+        </GlassCard>
+      )}
 
-            {/* No Results */}
-            {searchQuery && suggestions.length === 0 && !isSearching && (
-              <GlassCard style={styles.noResultsCard}>
-                <Ionicons name="search" size={32} color={GlassTheme.colors.textMuted} />
-                <Text style={styles.noResultsTitle}>No locations found</Text>
-                <Text style={styles.noResultsText}>
-                  Try a different search term or check your spelling
-                </Text>
-              </GlassCard>
-            )}
+      {/* Saved Locations */}
+      {!searchQuery && savedLocations.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Saved Locations</Text>
+          {savedLocations.map((location) => (
+            <LocationItem
+              key={location.id}
+              location={location}
+              icon="bookmark"
+            />
+          ))}
+        </>
+      )}
 
-            {/* Saved Locations */}
-            {!searchQuery && savedLocations.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Saved Locations</Text>
-                {savedLocations.map((location) => (
-                  <LocationItem 
-                    key={location.id} 
-                    location={location} 
-                    icon="bookmark" 
-                  />
-                ))}
-              </>
-            )}
+      {/* Recent Locations */}
+      {!searchQuery && recentLocations.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Recent</Text>
+          {recentLocations.map((location) => (
+            <LocationItem
+              key={location.id}
+              location={location}
+              icon="time"
+            />
+          ))}
+        </>
+      )}
 
-            {/* Recent Locations */}
-            {!searchQuery && recentLocations.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Recent</Text>
-                {recentLocations.map((location) => (
-                  <LocationItem 
-                    key={location.id} 
-                    location={location} 
-                    icon="time" 
-                  />
-                ))}
-              </>
-            )}
-
-            {/* Popular Locations */}
-            {!searchQuery && (
-              <>
-                <Text style={styles.sectionTitle}>Popular Locations</Text>
-                {POPULAR_LOCATIONS.map((location) => (
-                  <LocationItem 
-                    key={location.id} 
-                    location={location} 
-                    icon="trending-up" 
-                  />
-                ))}
-              </>
-            )}
-          </ScrollView>
-        </SafeAreaView>
-      </GlassBackground>
-    </Modal>
+      {/* Popular Locations */}
+      {!searchQuery && (
+        <>
+          <Text style={styles.sectionTitle}>Popular Locations</Text>
+          {POPULAR_LOCATIONS.map((location) => (
+            <LocationItem
+              key={location.id}
+              location={location}
+              icon="trending-up"
+            />
+          ))}
+        </>
+      )}
+    </AppBottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: GlassTheme.colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: GlassTheme.colors.text,
-  },
-  placeholder: {
-    width: 40,
-  },
-  content: {
-    padding: 20,
-    paddingTop: 0,
-  },
-
   searchSection: {
     marginBottom: 20,
   },

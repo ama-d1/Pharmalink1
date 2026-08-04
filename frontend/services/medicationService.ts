@@ -2,8 +2,8 @@ import { API } from '@/constants/api';
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
 import { getAuthHeaders } from '@/utils/authHeaders';
 
-const BASE_URL = API.medications;
-const DRUG_URL = API.drugSearch;
+// API.medications / API.drugSearch are read at call time — see
+// constants/api.ts on why the URL must not be captured in a module-level const.
 
 // ── Medication CRUD ────────────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ export const addMedication = async (
 ) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/add`, {
+    response = await fetchWithTimeout(`${API.medications}/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
       body: JSON.stringify({ userId, name, dosage, frequency, reminderTime, startDate, instructions }),
@@ -56,7 +56,7 @@ export const addMedication = async (
 export const getUserMedications = async (userId: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}`, {
+    response = await fetchWithTimeout(`${API.medications}/user/${userId}`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
   } catch (err: any) {
@@ -75,7 +75,7 @@ export const getUserMedications = async (userId: string) => {
 export const updateDoseStatus = async (medicationId: string, status: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/${medicationId}/dose-status?status=${status}`, {
+    response = await fetchWithTimeout(`${API.medications}/${medicationId}/dose-status?status=${status}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
@@ -92,7 +92,7 @@ export const updateDoseStatus = async (medicationId: string, status: string) => 
 };
 
 export const deleteMedication = async (medicationId: string) => {
-  const response = await fetchWithTimeout(`${BASE_URL}/${medicationId}`, {
+  const response = await fetchWithTimeout(`${API.medications}/${medicationId}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
@@ -104,7 +104,7 @@ export const deleteMedication = async (medicationId: string) => {
 export const countActiveMedications = async (userId: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/count`, {
+    response = await fetchWithTimeout(`${API.medications}/user/${userId}/count`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
   } catch (err: any) {
@@ -122,7 +122,7 @@ export const countActiveMedications = async (userId: string) => {
 export const getActiveMedicationCount = async (userId: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/count`, {
+    response = await fetchWithTimeout(`${API.medications}/user/${userId}/count`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
   } catch (err: any) {
@@ -140,7 +140,7 @@ export const getActiveMedicationCount = async (userId: string) => {
 export const getPendingMedications = async (userId: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/user/${userId}/active`, {
+    response = await fetchWithTimeout(`${API.medications}/user/${userId}/active`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
   } catch (err: any) {
@@ -194,7 +194,7 @@ export const getDrugSuggestions = async (query: string): Promise<DrugSuggestion[
     // needs the same auth header as everything else, even though it's just
     // a search-suggestion endpoint.
     const res = await fetchWithTimeout(
-      `${DRUG_URL}/suggest?q=${encodeURIComponent(query.trim())}&limit=8`,
+      `${API.drugSearch}/suggest?q=${encodeURIComponent(query.trim())}&limit=8`,
       { headers: await getAuthHeaders() },
       6000
     );
@@ -214,7 +214,7 @@ export const searchDrugs = async (query: string, limit = 10): Promise<DrugSearch
   if (!query || query.trim().length < 2) return [];
   try {
     const res = await fetchWithTimeout(
-      `${DRUG_URL}/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`,
+      `${API.drugSearch}/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`,
       { headers: await getAuthHeaders() },
       6000
     );
@@ -231,7 +231,7 @@ export const searchDrugs = async (query: string, limit = 10): Promise<DrugSearch
  */
 export const getDrugCatalog = async (): Promise<DrugSearchResult[]> => {
   try {
-    const res = await fetchWithTimeout(`${DRUG_URL}/catalog`, { headers: await getAuthHeaders() }, 6000);
+    const res = await fetchWithTimeout(`${API.drugSearch}/catalog`, { headers: await getAuthHeaders() }, 6000);
     if (!res.ok) return [];
     return await res.json();
   } catch {

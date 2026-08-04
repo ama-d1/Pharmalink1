@@ -1,5 +1,5 @@
 import { Client, IMessage } from '@stomp/stompjs';
-import { API, DIRECT_BACKEND_URL } from '@/constants/api';
+import { API } from '@/constants/api';
 import { getAuthHeaders, getAuthToken } from '@/utils/authHeaders';
 
 // FIXED — this used to connect via SockJS (new SockJS(`${BASE_URL}/ws`)),
@@ -22,12 +22,17 @@ import { getAuthHeaders, getAuthToken } from '@/utils/authHeaders';
 // The STOMP CONNECT-frame auth below (connectHeaders) is unchanged and
 // still required — chat-service's StompAuthChannelInterceptor rejects any
 // connection without a valid JWT regardless of transport.
-// Uses DIRECT_BACKEND_URL, not API.base — the WebSocket upgrade isn't
-// proxied through Metro (see metro.config.js), so this has to point at the
-// real backend address/port directly, same as before this whole hotspot
-// saga, while the REST calls below (BASE_URL, from API.base) now go through
-// Metro's proxy like everything else.
-const WS_BASE_URL = DIRECT_BACKEND_URL.replace(/^http/, 'ws');
+// Uses API.ws (built from getDirectBackendUrl()), not API.base — the
+// WebSocket upgrade isn't proxied through Metro (see metro.config.js), so in
+// dev this has to point at the real backend address/port directly, while the
+// REST calls below go through Metro's proxy. In a standalone build there is
+// no proxy and the two collapse to the same origin.
+//
+// FIXED 2026-08-04 — this was `const WS_BASE_URL = DIRECT_BACKEND_URL...`,
+// evaluated once at module load. That froze the address before the saved
+// server-URL override had been hydrated from AsyncStorage, so chat kept
+// dialing the build-time host even after the user pointed the app somewhere
+// else. API.ws is a getter and re-resolves per read.
 
 export interface ChatMessage {
   id: string;
@@ -41,9 +46,8 @@ export interface ChatMessage {
 }
 
 // Was API.auth.replace('/api/auth', '') — worked, but fragile (silently
-// wrong if API.auth's path ever changed) and pointless when API.base is
-// already the exact same origin, exported directly for this.
-const BASE_URL = API.base;
+// wrong if API.auth's path ever changed) and pointless when API.chat is
+// already the exact same origin plus the right prefix.
 
 let stompClient: Client | null = null;
 
@@ -59,7 +63,7 @@ export async function connectToConversation(
   const token = await getAuthToken();
 
   stompClient = new Client({
-    brokerURL: `${WS_BASE_URL}/ws`,
+    brokerURL: API.ws,
     connectHeaders: token ? { Authorization: `Bearer ${token}` } : {},
     reconnectDelay: 5000,
     onConnect: () => {
@@ -90,7 +94,7 @@ export async function startConversation(
   pharmacistId: string
 ): Promise<{ id: string }> {
   const res = await fetch(
-    `${BASE_URL}/api/chat/conversation/start?patientId=${patientId}&pharmacistId=${pharmacistId}`,
+    `${API.chat}/conversation/start?patientId=${patientId}&pharmacistId=${pharmacistId}`,
     { method: 'POST', headers: await getAuthHeaders() }
   );
   return parseOrThrow(res, 'Starting conversation');
@@ -101,7 +105,7 @@ export async function startDriverConversation(
   driverId: string
 ): Promise<{ id: string }> {
   const res = await fetch(
-    `${BASE_URL}/api/chat/conversation/start-driver-chat?patientId=${patientId}&driverId=${driverId}`,
+    `${API.chat}/conversation/start-driver-chat?patientId=${patientId}&driverId=${driverId}`,
     { method: 'POST', headers: await getAuthHeaders() }
   );
   return parseOrThrow(res, 'Starting conversation');
@@ -112,7 +116,7 @@ export async function sendMessage(
   senderId: string,
   content: string
 ): Promise<ChatMessage> {
-  const res = await fetch(`${BASE_URL}/api/chat/message/send`, {
+  const res = await fetch(`${API.chat}/message/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ conversationId, senderId, content, messageType: 'TEXT' }),
@@ -121,19 +125,19 @@ export async function sendMessage(
 }
 
 export async function getMessages(conversationId: string): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE_URL}/api/chat/messages/${conversationId}`, { headers: await getAuthHeaders() });
+  const res = await fetch(`${API.chat}/messages/${conversationId}`, { headers: await getAuthHeaders() });
   return parseOrThrow(res, 'Loading messages');
 }
 
 export async function getConversationsForUser(userId: string): Promise<any[]> {
-  const res = await fetch(`${BASE_URL}/api/chat/conversations/${userId}`, { headers: await getAuthHeaders() });
+  const res = await fetch(`${API.chat}/conversations/${userId}`, { headers: await getAuthHeaders() });
   return parseOrThrow(res, 'Loading conversations');
 }
 
 export async function searchPharmacists(query: string, pharmacyId?: string) {
   const params = new URLSearchParams({ q: query });
   if (pharmacyId) params.append('pharmacyId', pharmacyId);
-  const res = await fetch(`${BASE_URL}/api/chat/pharmacists/search?${params}`, { headers: await getAuthHeaders() });
+  const res = await fetch(`${API.chat}/pharmacists/search?${params}`, { headers: await getAuthHeaders() });
   return parseOrThrow(res, 'Searching pharmacists');
 }
 
@@ -144,7 +148,7 @@ export async function sendMediaMessage(
   messageType: 'TEXT' | 'AUDIO' | 'VIDEO',
   mediaUrl?: string
 ): Promise<ChatMessage> {
-  const res = await fetch(`${BASE_URL}/api/chat/message/send`, {
+  const res = await fetch(`${API.chat}/message/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ conversationId, senderId, content, messageType, mediaUrl }),

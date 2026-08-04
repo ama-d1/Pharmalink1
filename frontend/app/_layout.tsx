@@ -1,20 +1,46 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect, useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { loadApiBaseUrlOverride } from '@/constants/api';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/context/AuthContext';
 import { CartProvider } from '@/context/CartContext';
+import { ModalProvider } from '@/context/ModalContext';
 
 
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  // The saved server-URL override lives in AsyncStorage, so it can only be
+  // read asynchronously — but constants/api.ts resolves the base URL
+  // synchronously on every read, because non-React code (services/*,
+  // ChatClient) needs it. Rendering is held back until that one-time
+  // hydration finishes so no request can go out against the build-time URL
+  // and then get "corrected" mid-flight. It's a single AsyncStorage read, so
+  // this resolves well within the splash screen.
+  const [apiUrlReady, setApiUrlReady] = useState(false);
+  useEffect(() => {
+    loadApiBaseUrlOverride().finally(() => setApiUrlReady(true));
+  }, []);
+
+  if (!apiUrlReady) return null;
+
   return (
+    // @gorhom/bottom-sheet's pan-down-to-close gesture needs a
+    // GestureHandlerRootView somewhere above it in the tree — without this,
+    // sheets render but the drag handle silently does nothing.
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <AuthProvider>
       <CartProvider>
+        {/* ModalProvider sits inside the theme/nav providers but wraps the
+            whole Stack, so the single shared <AppModal> it renders floats
+            above every screen regardless of which route is active. */}
+        <ModalProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -25,6 +51,7 @@ export default function RootLayout() {
             <Stack.Screen name="notifications" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="admin-login" options={{ headerShown: false }} />
             <Stack.Screen name="verify-2fa" options={{ headerShown: false }} />
+            <Stack.Screen name="server-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="(admin)" options={{ headerShown: false }} />
             {/* (pharmacist) and (driver) each have their own nested Stack
@@ -57,7 +84,9 @@ export default function RootLayout() {
           </Stack>
           <StatusBar style="light" />
         </ThemeProvider>
+        </ModalProvider>
       </CartProvider>
     </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

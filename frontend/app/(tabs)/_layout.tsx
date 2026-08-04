@@ -1,14 +1,28 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassTheme } from '@/constants/glassTheme';
 
+const TAB_CONTENT_HEIGHT = 60;
+
 export default function TabLayout() {
+  // FIXED — the bar previously hardcoded `paddingBottom: iOS ? 20 : 8`, which
+  // ignores the real bottom inset. On Android with edge-to-edge (the default
+  // from Expo SDK 54 / targetSdk 35 onward) the app draws under the gesture
+  // navigation bar, so the tab labels sat partly beneath the gesture pill.
+  // Reading the actual inset is correct in BOTH modes: it's 0 when the system
+  // already insets the window, and the nav-bar height when it doesn't.
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [
+          styles.tabBar,
+          { height: TAB_CONTENT_HEIGHT + insets.bottom, paddingBottom: insets.bottom + 6 },
+        ],
         tabBarBackground: () => (
           <View style={[StyleSheet.absoluteFill, styles.tabBarBg]} />
         ),
@@ -70,8 +84,6 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
-    height: Platform.OS === 'ios' ? 80 : 68,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 8,
     paddingTop: 8,
     elevation: 0,
     borderTopWidth: 0,
@@ -79,11 +91,11 @@ const styles = StyleSheet.create({
   },
   tabBarBg: {
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: GlassTheme.colors.divider,
-    ...GlassTheme.shadow.lg,
+    ...GlassTheme.shadow.sm,
     // flip shadow upward
-    shadowOffset: { width: 0, height: -4 },
+    shadowOffset: { width: 0, height: -2 },
   },
   tabLabel: {
     fontSize: 10,

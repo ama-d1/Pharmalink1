@@ -1,10 +1,8 @@
 import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassButton } from '@/components/glass/GlassButton';
@@ -21,14 +19,19 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
+import { useModal } from '@/context/ModalContext';
+import { useConnectionError } from '@/hooks/useConnectionError';
 import { loginUser } from '@/services/authService';
 import { EMAIL_REGEX } from '@/utils/validation';
 
 import logo from '../assets/images/logo-icon.png';
 
 export default function LoginScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setSession } = useAuth();
+  const { showError } = useModal();
+  const showConnectionError = useConnectionError();
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -93,13 +96,13 @@ export default function LoginScreen() {
         });
         router.replace(postLoginRoute as any);
       } else {
-        Alert.alert('Login Failed', data.message || 'Invalid credentials.');
+        showError('Login Failed', data.message || 'Invalid credentials.');
       }
     } catch (err: any) {
-      if (err?.message === 'NETWORK_ERROR') {
-        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
+        showConnectionError();
       } else {
-        Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
+        showError('Server Error', 'The server responded unexpectedly. Please try again shortly.');
       }
     } finally {
       setLoading(false);
@@ -108,11 +111,11 @@ export default function LoginScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
 
-      <SafeAreaView style={{ flex: 1 }}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           style={{ flex: 1 }}
         >
           <ScrollView
@@ -124,7 +127,7 @@ export default function LoginScreen() {
             <View style={styles.hero}>
               <LinearGradient
                 colors={GlassTheme.gradients.headerBg}
-                style={styles.heroGrad}
+                style={[styles.heroGrad, { paddingTop: insets.top + 24 }]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
@@ -178,7 +181,7 @@ export default function LoginScreen() {
               />
 
               <View style={styles.registerRow}>
-                <Text style={styles.registerHint}>Don't have an account? </Text>
+                <Text style={styles.registerHint}>Don&apos;t have an account? </Text>
                 <TouchableOpacity onPress={() => router.push('/register')}>
                   <Text style={styles.registerLink}>Sign Up</Text>
                 </TouchableOpacity>
@@ -188,6 +191,12 @@ export default function LoginScreen() {
             <View style={styles.staffDivider} />
             <TouchableOpacity style={styles.staffRow} onPress={() => router.push('/admin-login' as any)}>
               <Text style={styles.staffText}>Staff / Admin sign in</Text>
+            </TouchableOpacity>
+            {/* Also offered from the connection-error dialog, but kept here as
+                a standing entry point — someone who already knows the backend
+                moved shouldn't have to fail a login first to get to it. */}
+            <TouchableOpacity style={styles.staffRow} onPress={() => router.push('/server-settings' as any)}>
+              <Text style={styles.staffText}>Server settings</Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>

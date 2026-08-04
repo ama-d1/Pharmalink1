@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text,
+  Alert, KeyboardAvoidingView, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text,
   TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
@@ -15,6 +15,7 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
+import { useCart } from '@/context/CartContext';
 import {
   bookAppointment, getAdherenceReport, getAppointments, getProfile,
   logDose, updateHealthInfo, updateProfile, updateSettings, UserProfile,
@@ -44,9 +45,14 @@ function AdherenceRing({ percent }: { percent: number }) {
 }
 
 export default function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const { user, clearSession } = useAuth();
+  const { getCartItems, getCartTotal, getCartItemsCount, getCartPharmacy, updateQuantity, clearCart } = useCart();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
+  // Loaded alongside the profile so the Health Summary can report adherence
+  // from the same data the Meds tab shows — see the adherence note below.
+  const [meds, setMeds] = useState<any[]>([]);
   const [editModal, setEditModal] = useState<'profile' | 'health' | 'book' | 'notifications' | 'privacy' | 'report' | 'logDose' | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [adherenceReport, setAdherenceReport] = useState<any>(null);
@@ -65,6 +71,11 @@ export default function ProfileScreen() {
       setProfile(data);
       const appts = await getAppointments(user.userId);
       setAppointments(appts);
+    } catch { /* offline */ }
+    // Separate try/catch: a medications failure must not blank the profile
+    // data already fetched above it.
+    try {
+      setMeds(await getUserMedications(user.userId));
     } catch { /* offline */ }
     getTwoFactorStatus().then(setTwoFactorEnabledState);
   }, [user?.userId]);
@@ -173,10 +184,43 @@ export default function ProfileScreen() {
       setSavingTwoFactor(false);
     }
   };
+  // ── Adherence ────────────────────────────────────────────────────────
+  // This read a flat 0% for basically everyone, and the cause was that the
+  // app tracks doses in TWO places that never talk to each other:
+  //
+  //   • profile-service's logDose()      — what `profile.adherenceRate` is
+  //                                        computed from. Only ever called
+  //                                        by this screen's "Log Dose"
+  //                                        button.
+  //   • medication-service's updateDoseStatus() — what the Meds tab's
+  //                                        "Take Now" button calls.
+  //
+  // So a user who had been marking every dose Taken in the Meds tab still
+  // saw 0% here, because none of that reached profile-service. Rather than
+  // show a number that contradicts what the rest of the app displays, fall
+  // back to deriving today's rate from the same medication records the Meds
+  // tab renders. The backend figure still wins whenever it actually has
+  // logged history, so real data is never discarded.
+  const takenToday = meds.filter((m) => m.doseStatus === 'TAKEN').length;
+  const localAdherence = meds.length > 0 ? (takenToday / meds.length) * 100 : 0;
+  const backendAdherence = profile?.adherenceRate ?? 0;
+  const adherenceRate = backendAdherence > 0 ? backendAdherence : localAdherence;
+  // Same idea — the live list is authoritative over a denormalized count.
+  const medicationCount = meds.length > 0 ? meds.length : (profile?.medicationCount ?? 0);
+  const cartItems = getCartItems();
+  const cartTotal = getCartTotal();
+  const cartCount = getCartItemsCount();
+  const cartPharmacy = getCartPharmacy();
+  const handleClearCart = () => {
+    Alert.alert('Clear cart', 'Remove all items from your cart?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => clearCart() },
+    ]);
+  };
 
   const stats = [
-    { id: 'meds', label: 'Medications', value: String(profile?.medicationCount ?? 0), icon: 'medkit-outline' as const, color: GlassTheme.colors.primary, bg: GlassTheme.colors.primaryLight },
-    { id: 'adherence', label: 'Adherence', value: `${Math.round(profile?.adherenceRate ?? 0)}%`, percent: profile?.adherenceRate ?? 0, color: GlassTheme.colors.accent, bg: GlassTheme.colors.accentLight },
+    { id: 'meds', label: 'Medications', value: String(medicationCount), icon: 'medkit-outline' as const, color: GlassTheme.colors.primary, bg: GlassTheme.colors.primaryLight },
+    { id: 'adherence', label: 'Adherence', value: `${Math.round(adherenceRate)}%`, percent: adherenceRate, color: GlassTheme.colors.accent, bg: GlassTheme.colors.accentLight },
     { id: 'streak', label: 'Day Streak', value: String(profile?.dayStreak ?? 0), icon: 'flame-outline' as const, color: GlassTheme.colors.amber, bg: GlassTheme.colors.amberLight },
     { id: 'appts', label: 'Appointments', value: String(profile?.appointmentCount ?? 0), icon: 'calendar-outline' as const, color: GlassTheme.colors.violet, bg: GlassTheme.colors.violetLight },
   ];
@@ -190,19 +234,22 @@ export default function ProfileScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/* light-content: the ink header runs edge-to-edge under the status
+          bar (no 'top' safe-area edge below), so dark icons would be
+          invisible against it. Matches every other screen's title bar. */}
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+        <ScrollView
+            keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
           {/* ── Profile Header ── */}
           <Animated.View entering={FadeInDown.duration(400)}>
             <LinearGradient
               colors={GlassTheme.gradients.headerBg}
-              style={styles.profileHeader}
+              style={[styles.profileHeader, { paddingTop: insets.top + 24 }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <View style={styles.headerBubble} />
               <View style={styles.avatarCircle}>
                 <Text style={styles.avatarText}>{initials}</Text>
               </View>
@@ -253,6 +300,82 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ))}
           </View>
+          {/* ── Cart ── */}
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionLabel}>Your Cart</Text>
+            {cartCount > 0 && (
+              <TouchableOpacity onPress={handleClearCart} hitSlop={8}>
+                <Text style={styles.clearLink}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {cartItems.length === 0 ? (
+            <GlassCard style={styles.cartEmpty}>
+              <Ionicons name="bag-outline" size={28} color={GlassTheme.colors.textDim} />
+              <Text style={styles.cartEmptyTitle}>Your cart is empty</Text>
+              <Text style={styles.cartEmptyHint}>Search medications to compare prices and start an order.</Text>
+              <TouchableOpacity style={styles.cartCta} onPress={() => router.push('/order')} activeOpacity={0.85}>
+                <Text style={styles.cartCtaText}>Browse medications</Text>
+                <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+              </TouchableOpacity>
+            </GlassCard>
+          ) : (
+            <GlassCard style={styles.cartCard}>
+              {!!cartPharmacy && (
+                <View style={styles.cartPharmacyRow}>
+                  <Ionicons name="storefront-outline" size={14} color={GlassTheme.colors.primary} />
+                  <Text style={styles.cartPharmacyText} numberOfLines={1}>
+                    From {cartPharmacy.pharmacyName}
+                  </Text>
+                </View>
+              )}
+              {cartItems.map((item, i) => (
+                <View key={item.id} style={[styles.cartRow, i > 0 && styles.cartRowDivider]}>
+                  <View style={styles.cartThumb}>
+                    <Ionicons name="medical" size={16} color={GlassTheme.colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cartName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.cartMeta}>₵{item.price.toFixed(2)} each</Text>
+                    <View style={styles.qtyRow}>
+                      <TouchableOpacity
+                        onPress={() => updateQuantity(item.id, item.quantity - 1)}
+                        style={styles.qtyBtn}
+                        hitSlop={6}
+                      >
+                        <Ionicons name="remove" size={13} color={GlassTheme.colors.text} />
+                      </TouchableOpacity>
+                      <Text style={styles.qtyText}>{item.quantity}</Text>
+                      <TouchableOpacity
+                        onPress={() => updateQuantity(item.id, item.quantity + 1)}
+                        style={styles.qtyBtn}
+                        hitSlop={6}
+                      >
+                        <Ionicons name="add" size={13} color={GlassTheme.colors.text} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <Text style={styles.cartLineTotal}>₵{(item.price * item.quantity).toFixed(2)}</Text>
+                </View>
+              ))}
+              <View style={styles.cartDivider} />
+              <View style={styles.cartTotalRow}>
+                <Text style={styles.cartTotalLabel}>
+                  Subtotal · {cartCount} item{cartCount === 1 ? '' : 's'}
+                </Text>
+                <Text style={styles.cartTotalValue}>₵{cartTotal.toFixed(2)}</Text>
+              </View>
+              <Text style={styles.cartNote}>Pickup or delivery fee is decided at checkout.</Text>
+              <TouchableOpacity
+                style={styles.cartCta}
+                onPress={() => router.push('/delivery' as any)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.cartCtaText}>Checkout · ₵{cartTotal.toFixed(2)}</Text>
+                <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+              </TouchableOpacity>
+            </GlassCard>
+          )}
 
           {/* ── Health Info ── */}
           <Text style={styles.sectionLabel}>Health Info</Text>
@@ -331,7 +454,7 @@ export default function ProfileScreen() {
         <Modal visible={!!editModal} transparent animationType="slide">
           <KeyboardAvoidingView
             style={styles.modalOverlay}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior="padding"
           >
             <View style={styles.modalSheet}>
               <View style={styles.modalHandle} />
@@ -528,11 +651,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
-  headerBubble: {
-    position: 'absolute', top: -50, right: -40,
-    width: 160, height: 160, borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
   avatarCircle: {
     width: 84, height: 84, borderRadius: 42,
     backgroundColor: 'rgba(255,255,255,0.25)',
@@ -555,6 +673,56 @@ const styles = StyleSheet.create({
     fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text,
     marginTop: 24, marginBottom: 12, paddingHorizontal: 20,
   },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 20 },
+  clearLink: { fontSize: 12, fontWeight: '700', color: GlassTheme.colors.danger, marginTop: 12 },
+  // ── Cart ──
+  cartCard: { marginHorizontal: 20, gap: 0 },
+  cartEmpty: { marginHorizontal: 20, alignItems: 'center', gap: 6, paddingVertical: 26 },
+  cartEmptyTitle: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text, marginTop: 4 },
+  cartEmptyHint: {
+    fontSize: 12, color: GlassTheme.colors.textDim,
+    textAlign: 'center', lineHeight: 17, paddingHorizontal: 16,
+  },
+  cartPharmacyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    borderRadius: GlassTheme.radius.sm,
+    paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12,
+  },
+  cartPharmacyText: { flex: 1, fontSize: 12, fontWeight: '700', color: GlassTheme.colors.primary },
+  cartRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, paddingVertical: 11 },
+  cartRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GlassTheme.colors.divider },
+  cartThumb: {
+    width: 36, height: 36, borderRadius: 11,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cartName: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
+  cartMeta: { fontSize: 11, color: GlassTheme.colors.textMuted, marginTop: 2 },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  qtyBtn: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  qtyText: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text, minWidth: 16, textAlign: 'center' },
+  cartLineTotal: { fontSize: 13, fontWeight: '800', color: GlassTheme.colors.text },
+  cartDivider: {
+    height: StyleSheet.hairlineWidth, backgroundColor: GlassTheme.colors.divider,
+    marginTop: 6, marginBottom: 12,
+  },
+  cartTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cartTotalLabel: { fontSize: 13, color: GlassTheme.colors.textMuted },
+  cartTotalValue: { fontSize: 17, fontWeight: '800', color: GlassTheme.colors.text },
+  cartNote: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: 4 },
+  cartCta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: GlassTheme.colors.primary,
+    borderRadius: GlassTheme.radius.sm,
+    paddingVertical: 13, marginTop: 14,
+  },
+  cartCtaText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
 
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 20 },
   statCell: { width: '47%', flexGrow: 1 },

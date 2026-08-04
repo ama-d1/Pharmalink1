@@ -140,6 +140,7 @@ export default function AdminUsersScreen() {
           <ActivityIndicator style={{ marginTop: 40 }} color={GlassTheme.colors.primary} />
         ) : (
           <FlatList
+            keyboardShouldPersistTaps="handled"
             data={filtered}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
@@ -148,7 +149,7 @@ export default function AdminUsersScreen() {
               <View style={styles.empty}>
                 <Ionicons name="people-outline" size={32} color={GlassTheme.colors.textDim} />
                 <Text style={styles.emptyText}>No users to show yet. This screen is wired to
-                  GET /api/admin/users — it'll populate once the backend endpoint exists.</Text>
+                  GET /api/admin/users — it&apos;ll populate once the backend endpoint exists.</Text>
               </View>
             }
             renderItem={({ item }) => (
@@ -201,6 +202,7 @@ export default function AdminUsersScreen() {
                 <>
                   <Text style={styles.pickerTitle}>Assign a pharmacy for {pickerUser?.fullName}</Text>
                   <FlatList
+            keyboardShouldPersistTaps="handled"
                     data={pharmacies}
                     keyExtractor={(p) => p.id}
                     style={{ maxHeight: 320 }}
@@ -225,7 +227,7 @@ export default function AdminUsersScreen() {
                   </Text>
                   <TouchableOpacity style={styles.pickerRow} onPress={() => assignPharmacyRole('OWNER')}>
                     <Text style={styles.pickerRowName}>Owner</Text>
-                    <Text style={styles.pickerRowAddress}>Runs this pharmacy's account</Text>
+                    <Text style={styles.pickerRowAddress}>Runs this pharmacy&apos;s account</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[styles.pickerRow, { borderBottomWidth: 0 }]} onPress={() => assignPharmacyRole('MANAGER')}>
                     <Text style={styles.pickerRowName}>Manager</Text>

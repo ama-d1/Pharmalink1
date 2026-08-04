@@ -80,8 +80,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-pharmalink123}
       JWT_SECRET: ${JWT_SECRET:-pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
-      MAIL_USERNAME: bebedansoa@gmail.com
-      MAIL_PASSWORD: hjdtwozlwrerrcvk
+      # Read from .env like every other secret here. These were previously
+      # hardcoded literals, which silently overrode .env — so rotating the
+      # Gmail App Password there had no effect and the old, rejected one kept
+      # being used. A committed credential is also a leak: it's in git history
+      # and should be treated as compromised and rotated.
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      # Set LOG_RESET_CODE=true in .env to print password-reset codes into
+      # `docker compose logs auth-service` — useful while SMTP is broken.
+      # Never enable it outside local development.
+      LOG_RESET_CODE: ${LOG_RESET_CODE:-false}
       USER_PROFILE_SERVICE_URL: http://user-profile-service:8082
       # First-admin bootstrap (see FirstAdminBootstrap.java) — set this to an
       # already-registered account's email, then `docker compose restart
@@ -307,8 +316,14 @@ services:
       ADMIN_SERVICE_URL: http://admin-service:8091
       HOME_SERVICE_URL: http://home-service:8092
       PAYMENT_SERVICE_URL: http://payment-service:8093
+    # Bind address is a variable so the production overlay can restrict the
+    # gateway to loopback (127.0.0.1:8080) and let Caddy be the only thing
+    # facing the internet. Compose can add ports in an overlay but cannot
+    # remove or rewrite them, so the choice has to live here. Default is
+    # unchanged for local dev: published on all interfaces, which is what
+    # makes it reachable from a phone on the LAN.
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT_BIND:-0.0.0.0:8080}:8080"
     depends_on:
       - auth-service
       - user-profile-service

@@ -1,7 +1,8 @@
 import { API } from '@/constants/api';
 import { getAuthHeaders } from '@/utils/authHeaders';
 
-const BASE = API.pharmacies;
+// API.pharmacies is read at call time — see constants/api.ts on why the URL
+// must not be captured in a module-level const.
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export async function getPharmacies(filters?: PharmacySearchFilters): Promise<Ph
       if (filters.openNow)   params.append('openNow',   'true');
       if (filters.sortBy)    params.append('sortBy',    filters.sortBy);
     }
-    const url = params.toString() ? `${BASE}?${params}` : BASE;
+    const url = params.toString() ? `${API.pharmacies}?${params}` : API.pharmacies;
     const res = await fetch(url, { headers: await getAuthHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
@@ -91,7 +92,7 @@ export async function getPharmacies(filters?: PharmacySearchFilters): Promise<Ph
  */
 export async function getPharmacyById(id: string): Promise<Pharmacy | null> {
   try {
-    const res = await fetch(`${BASE}/${id}`, { headers: await getAuthHeaders() });
+    const res = await fetch(`${API.pharmacies}/${id}`, { headers: await getAuthHeaders() });
     if (!res.ok) return null;
     return res.json();
   } catch (err) {
@@ -110,7 +111,7 @@ export async function getNearbyPharmacies(
   radius = 10,
 ): Promise<Pharmacy[]> {
   try {
-    const res = await fetch(`${BASE}/nearby?lat=${latitude}&lng=${longitude}&radius=${radius}`, {
+    const res = await fetch(`${API.pharmacies}/nearby?lat=${latitude}&lng=${longitude}&radius=${radius}`, {
       headers: await getAuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -127,7 +128,7 @@ export async function getNearbyPharmacies(
  */
 export async function searchPharmacies(searchParams: PharmacySearchParams): Promise<Pharmacy[]> {
   try {
-    const res = await fetch(`${BASE}/search`, {
+    const res = await fetch(`${API.pharmacies}/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
       body: JSON.stringify({
@@ -150,7 +151,7 @@ export async function searchPharmacies(searchParams: PharmacySearchParams): Prom
  */
 export async function getPharmacyReviews(pharmacyId: string): Promise<PharmacyReview[]> {
   try {
-    const res = await fetch(`${BASE}/${pharmacyId}/reviews`, { headers: await getAuthHeaders() });
+    const res = await fetch(`${API.pharmacies}/${pharmacyId}/reviews`, { headers: await getAuthHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   } catch (err) {
@@ -169,7 +170,7 @@ export async function submitPharmacyReview(
   rating: number,
   comment: string,
 ): Promise<PharmacyReview> {
-  const res = await fetch(`${BASE}/${pharmacyId}/reviews`, {
+  const res = await fetch(`${API.pharmacies}/${pharmacyId}/reviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ rating, comment }),
@@ -188,7 +189,7 @@ export async function submitPharmacyReview(
  * since it only ever renders on the caller's own review).
  */
 export async function deletePharmacyReview(pharmacyId: string, reviewId: string): Promise<void> {
-  const res = await fetch(`${BASE}/${pharmacyId}/reviews/${reviewId}`, {
+  const res = await fetch(`${API.pharmacies}/${pharmacyId}/reviews/${reviewId}`, {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });

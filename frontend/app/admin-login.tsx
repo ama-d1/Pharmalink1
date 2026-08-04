@@ -3,7 +3,6 @@ import { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -20,6 +19,7 @@ import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
+import { useConnectionError } from '@/hooks/useConnectionError';
 import { loginUser } from '@/services/authService';
 
 // Separate login flow for admin accounts — deliberately not reachable from the
@@ -28,6 +28,7 @@ import { loginUser } from '@/services/authService';
 export default function AdminLoginScreen() {
   const router = useRouter();
   const { setSession } = useAuth();
+  const showConnectionError = useConnectionError();
   const [loading, setLoading] = useState(false);
 
   const emailRef = useRef('');
@@ -70,8 +71,8 @@ export default function AdminLoginScreen() {
       });
       router.replace('/(admin)/AdminHome' as any);
     } catch (err: any) {
-      if (err?.message === 'NETWORK_ERROR') {
-        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
+        showConnectionError();
       } else {
         Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
       }
@@ -85,7 +86,7 @@ export default function AdminLoginScreen() {
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
       <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
             <View style={styles.hero}>
               <LinearGradient

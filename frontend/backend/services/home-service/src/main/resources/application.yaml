@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: home-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/pharmalink_home
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:pharmalink123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      initialization-fail-timeout: 1
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate            # Phase 2 (MICROSERVICES_PLAN.md sec 6 step 9): Flyway now
+                                     # owns schema creation/changes (see db/migration/V1__init.sql
+                                     # and the flyway block below) -- Hibernate only validates.
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # ---- Flyway --------------------------------------------
+  # Baseline (V1__init.sql) was hand-derived from this service's @Entity classes
+  # rather than pg_dump'ed from a live DB -- see the migration file's header
+  # comment and MICROSERVICES_PLAN.md Phase 2 step 9 for that caveat.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+# ── Cross-service calls ──────────────────────────────────────────────────────
+# medication count for the home summary — same MedicationClient that lived in
+# the old monolith, unchanged, just carried over. Best-effort.
+services:
+  medication:
+    base-url: ${MEDICATION_SERVICE_URL:http://localhost:8083}
+
+server:
+  port: 8092
+  address: 0.0.0.0

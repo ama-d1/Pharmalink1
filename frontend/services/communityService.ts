@@ -26,10 +26,24 @@ export type CommunityPost = {
   isHealthProfessional?: boolean;
 };
 
+// HARDENED — these used to call res.json() unconditionally. On any non-2xx
+// (a 403 from the gateway, a 502 while community-service restarts) the body
+// is an error object or an HTML page, so .json() either threw or resolved to
+// something that isn't an array — and the screens then crashed on .map().
+// Throwing a real Error instead lets the callers show a retry state that is
+// distinguishable from "there genuinely are no communities".
+async function readJson<T>(res: Response, what: string): Promise<T> {
+  if (!res.ok) {
+    throw new Error(`Could not load ${what} (${res.status})`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function getCommunities(userId?: string): Promise<Community[]> {
   const url = userId ? `${API.community}?userId=${userId}` : API.community;
   const res = await fetch(url, { headers: await getAuthHeaders() });
-  return res.json();
+  const data = await readJson<Community[]>(res, 'communities');
+  return Array.isArray(data) ? data : [];
 }
 
 export async function joinCommunity(communityId: string, userId: string) {
@@ -38,6 +52,19 @@ export async function joinCommunity(communityId: string, userId: string) {
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ userId }),
   });
+  if (!res.ok) throw new Error('Could not join this group');
+  return res.json();
+}
+
+// NEW — pairs with joinCommunity above, backed by the new
+// POST /api/community/{id}/leave route on community-service.
+export async function leaveCommunity(communityId: string, userId: string) {
+  const res = await fetch(`${API.community}/${communityId}/leave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) throw new Error('Could not leave this group');
   return res.json();
 }
 
@@ -46,7 +73,8 @@ export async function getCommunityPosts(communityId: string, userId?: string): P
     ? `${API.community}/${communityId}/posts?userId=${userId}`
     : `${API.community}/${communityId}/posts`;
   const res = await fetch(url, { headers: await getAuthHeaders() });
-  return res.json();
+  const data = await readJson<CommunityPost[]>(res, 'posts');
+  return Array.isArray(data) ? data : [];
 }
 
 export async function createPost(communityId: string, userId: string, content: string) {
@@ -55,6 +83,9 @@ export async function createPost(communityId: string, userId: string, content: s
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ userId, content }),
   });
+  // Must throw rather than soft-fail: the compose bar clears the user's
+  // draft on success, so a silent failure would delete what they typed.
+  if (!res.ok) throw new Error('Could not publish your post');
   return res.json();
 }
 
@@ -64,6 +95,7 @@ export async function likePost(postId: string, userId: string) {
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     body: JSON.stringify({ userId }),
   });
+  if (!res.ok) throw new Error('Could not update your like');
   return res.json();
 }
 

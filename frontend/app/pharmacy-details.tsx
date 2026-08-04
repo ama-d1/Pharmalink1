@@ -11,6 +11,7 @@ import {
   Dimensions,
   TextInput,
   ActivityIndicator,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -194,7 +195,7 @@ export default function PharmacyDetailsScreen() {
           <View style={styles.errorContainer}>
             <Ionicons name="alert-circle" size={48} color={GlassTheme.colors.textMuted} />
             <Text style={styles.errorTitle}>Pharmacy Not Found</Text>
-            <Text style={styles.errorText}>The pharmacy you're looking for could not be found.</Text>
+            <Text style={styles.errorText}>The pharmacy you&apos;re looking for could not be found.</Text>
             <GlassButton 
               label="Go Back" 
               onPress={() => router.back()} 
@@ -224,10 +225,16 @@ export default function PharmacyDetailsScreen() {
             <Ionicons name="call" size={20} color={GlassTheme.colors.accent} />
           </TouchableOpacity>
         </View>
+        {/* The "write a review" box is near the bottom of this scroll, so
+            without this the keyboard covered the field being typed into. */}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior="padding"
+        >
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
-        <ScrollView contentContainerStyle={styles.content}>
           {/* Pharmacy Header */}
-          <GlassCard gradient glow style={styles.headerCard}>
+          <GlassCard style={styles.headerCard}>
             <View style={styles.pharmacyHeader}>
               <View style={styles.pharmacyIcon}>
                 <Ionicons name="storefront" size={32} color={GlassTheme.colors.accent} />
@@ -514,6 +521,7 @@ export default function PharmacyDetailsScreen() {
             </View>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </GlassBackground>
   );

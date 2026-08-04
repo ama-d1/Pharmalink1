@@ -6,16 +6,11 @@ import {
   scheduleMedicationReminder,
 } from '@/services/notificationService';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView,
+  ActivityIndicator, Alert, ScrollView,
   StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassButton } from '@/components/glass/GlassButton';
-import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
@@ -24,8 +19,19 @@ import {
   getUserMedications, updateDoseStatus,
 } from '@/services/medicationService';
 import { TimePickerModal } from '@/components/ui/TimePickerModal';
+import { FormSheet } from '@/components/ui/FormSheet';
+import { ScreenRoot, DarkHeader, SheetBody } from '@/components/ui/ScreenShell';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 
 const FREQ_OPTIONS = ['Daily', 'Twice daily', 'Three times daily', 'Weekly', 'As needed'];
+
+const TABS = [
+  { key: 'today', label: 'Today' },
+  { key: 'reminders', label: 'Reminders' },
+  { key: 'history', label: 'History' },
+] as const;
+
+type TabKey = (typeof TABS)[number]['key'];
 
 // How many reminder times a given frequency implies, and sensible defaults for each.
 const DEFAULT_TIMES_BY_FREQ: Record<string, string[]> = {
@@ -54,6 +60,10 @@ const statusColors: Record<string, { bg: string; text: string; label: string }> 
   SNOOZED: { bg: GlassTheme.colors.violetLight, text: GlassTheme.colors.violet, label: 'Snoozed' },
 };
 
+// Rebuilt to the ui_ref layout: dark ink header carrying the title + a search
+// field, then a white rounded sheet holding the segmented tabs and flat,
+// hairline-bordered medication cards. All data/handlers are unchanged — this
+// is a presentation rewrite, not a behaviour change.
 export default function MedicationsScreen() {
   const { user } = useAuth();
   const [medications, setMedications] = useState<any[]>([]);
@@ -62,7 +72,10 @@ export default function MedicationsScreen() {
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [timePickerIndex, setTimePickerIndex] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'today' | 'reminders' | 'history'>('today');
+  const [activeTab, setActiveTab] = useState<TabKey>('today');
+  // Client-side filter over already-loaded medications — the header search
+  // field from the reference layout. No new network call.
+  const [query, setQuery] = useState('');
   const [form, setForm] = useState({
     name: '', dosage: '', frequency: 'Daily', reminderTimes: ['08:00'], instructions: '',
   });
@@ -222,604 +235,515 @@ export default function MedicationsScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <GlassBackground>
-        <View style={styles.loader}>
-          <ActivityIndicator size="large" color={GlassTheme.colors.primary} />
-        </View>
-      </GlassBackground>
-    );
-  }
-
   const takenCount = medications.filter((m) => m.doseStatus === 'TAKEN').length;
   const progress = medications.length > 0 ? (takenCount / medications.length) * 100 : 0;
 
-  return (
-    <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+  const visible = medications.filter(
+    (m) => !query.trim() || m.name?.toLowerCase().includes(query.trim().toLowerCase())
+  );
+  // Mirrors the reference's Active / Past split, driven by real dose status.
+  const activeMeds = visible.filter((m) => m.doseStatus !== 'TAKEN');
+  const doneMeds = visible.filter((m) => m.doseStatus === 'TAKEN');
 
-          {/* ── Header ── */}
-          <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.screenLabel}>MEDICATIONS</Text>
-              <Text style={styles.title}>My Medicines</Text>
+  const renderMedCard = (med: any, index: number) => {
+    const s = statusColors[med.doseStatus ?? 'PENDING'];
+    const isPending = med.doseStatus === 'PENDING' || !med.doseStatus;
+    return (
+      <Animated.View key={med.id} entering={FadeInDown.delay(index * 50).duration(280)}>
+        <View style={styles.medCard}>
+          <View style={styles.medTop}>
+            <View style={styles.medThumb}>
+              <Ionicons name="medical" size={19} color={GlassTheme.colors.primary} />
             </View>
-            <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
-              <LinearGradient colors={GlassTheme.gradients.headerBg} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-              <Ionicons name="add" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* ── Progress Banner ── */}
-          <Animated.View entering={FadeInDown.delay(80).duration(400)}>
-            <LinearGradient
-              colors={GlassTheme.gradients.headerBg}
-              style={styles.progressBanner}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.progressBubble} />
-              <View style={{ flex: 1, zIndex: 1 }}>
-                <Text style={styles.progressTitle}>Today's Progress</Text>
-                <Text style={styles.progressFraction}>{takenCount} / {medications.length} taken</Text>
-                <View style={styles.progressBarBg}>
-                  <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-                </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.medName}>{med.name}</Text>
+              <Text style={styles.medMeta}>
+                {[med.dosage, med.frequency].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <Text style={styles.medTime}>{med.reminderTime}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
+                <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
               </View>
-              <View style={styles.progressCircle}>
-                <Text style={styles.progressPct}>{Math.round(progress)}%</Text>
-              </View>
-            </LinearGradient>
-          </Animated.View>
-
-          {/* ── Tabs ── */}
-          <View style={styles.tabBar}>
-            {(['today', 'reminders', 'history'] as const).map((tab) => (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
-                onPress={() => setActiveTab(tab)}
-              >
-                <Ionicons
-                  name={tab === 'today' ? 'today-outline' : tab === 'reminders' ? 'alarm-outline' : 'time-outline'}
-                  size={15}
-                  color={activeTab === tab ? GlassTheme.colors.primary : GlassTheme.colors.textMuted}
-                />
-                <Text style={[styles.tabBtnText, activeTab === tab && styles.tabBtnTextActive]}>
-                  {tab === 'today' ? 'Today' : tab === 'reminders' ? 'Reminders' : 'History'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            </View>
           </View>
 
-          {/* ── Today Tab ── */}
-          {activeTab === 'today' && (
+          {!!med.instructions && (
             <>
-              <Text style={styles.sectionTitle}>Today's Schedule</Text>
-              {medications.length === 0 ? (
-                <GlassCard variant="flat" style={styles.emptyCard}>
-                  <Ionicons name="medical-outline" size={40} color={GlassTheme.colors.textDim} style={{ alignSelf: 'center' }} />
-                  <Text style={styles.emptyTitle}>No medications yet</Text>
-                  <Text style={styles.emptyHint}>Tap + to add your first medication</Text>
-                </GlassCard>
-              ) : (
-                medications.map((med, index) => {
-                  const s = statusColors[med.doseStatus ?? 'PENDING'];
-                  return (
-                    <Animated.View key={med.id} entering={FadeInDown.delay(index * 60).duration(300)}>
-                      <GlassCard style={styles.medCard}>
-                        <View style={styles.medRow}>
-                          <View style={styles.medIconWrap}>
-                            <Ionicons name="medical" size={22} color={GlassTheme.colors.primary} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.medName}>{med.name}</Text>
-                            <Text style={styles.medDosage}>{med.dosage} · {med.frequency}</Text>
-                            <Text style={styles.medTime}>
-                              <Ionicons name="alarm-outline" size={11} color={GlassTheme.colors.textDim} /> {med.reminderTime}
-                            </Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                            <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
-                              <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
-                            </View>
-                            <View style={styles.cardIconRow}>
-                              <TouchableOpacity onPress={() => openEditModal(med)} hitSlop={8}>
-                                <Ionicons name="create-outline" size={16} color={GlassTheme.colors.textMuted} />
-                              </TouchableOpacity>
-                              <TouchableOpacity onPress={() => handleDelete(med)} hitSlop={8}>
-                                <Ionicons name="trash-outline" size={16} color={GlassTheme.colors.danger} />
-                              </TouchableOpacity>
-                            </View>
-                          </View>
+              <View style={styles.medDivider} />
+              <Text style={styles.medPurpose}>
+                <Text style={styles.medPurposeLabel}>Purpose: </Text>
+                {med.instructions}
+              </Text>
+            </>
+          )}
+
+          <View style={styles.medDivider} />
+          <View style={styles.medActions}>
+            {isPending ? (
+              <>
+                <TouchableOpacity style={styles.takeBtn} onPress={() => handleDoseStatus(med.id, 'TAKEN')} activeOpacity={0.85}>
+                  <Ionicons name="checkmark" size={14} color="#FFF" />
+                  <Text style={styles.takeBtnText}>Take Now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.snoozeBtn} onPress={() => handleDoseStatus(med.id, 'SNOOZED')} activeOpacity={0.7}>
+                  <Ionicons name="alarm-outline" size={14} color={GlassTheme.colors.textMuted} />
+                  <Text style={styles.snoozeBtnText}>Snooze</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <View style={{ flex: 1 }} />
+            )}
+            <TouchableOpacity onPress={() => openEditModal(med)} hitSlop={10} style={styles.iconBtn}>
+              <Ionicons name="create-outline" size={17} color={GlassTheme.colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleDelete(med)} hitSlop={10} style={styles.iconBtn}>
+              <Ionicons name="trash-outline" size={17} color={GlassTheme.colors.danger} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Animated.View>
+    );
+  };
+
+  const emptyState = (icon: keyof typeof Ionicons.glyphMap, title: string, hint: string) => (
+    <View style={styles.emptyCard}>
+      <Ionicons name={icon} size={34} color={GlassTheme.colors.textDim} />
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyHint}>{hint}</Text>
+    </View>
+  );
+
+  return (
+    <ScreenRoot>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+      <DarkHeader
+        eyebrow="MEDICATIONS"
+        heading="My Medicines"
+        rightIcon="add"
+        onRightPress={openAddModal}
+        search={{
+          value: query,
+          onChangeText: setQuery,
+          placeholder: 'Search prescriptions, medication',
+          onClear: () => setQuery(''),
+        }}
+      />
+
+      <SheetBody>
+        <View style={styles.tabsWrap}>
+          <SegmentedTabs tabs={TABS} value={activeTab} onChange={setActiveTab} />
+        </View>
+
+        {loading ? (
+          <ActivityIndicator style={{ marginTop: 40 }} color={GlassTheme.colors.primary} />
+        ) : (
+          <ScrollView
+            keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+            {/* ── Today ── */}
+            {activeTab === 'today' && (
+              <>
+                {medications.length > 0 && (
+                  <View style={styles.progressRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.progressLabel}>Today&apos;s progress</Text>
+                      <Text style={styles.progressValue}>{takenCount} of {medications.length} taken</Text>
+                    </View>
+                    <Text style={styles.progressPct}>{Math.round(progress)}%</Text>
+                  </View>
+                )}
+                {medications.length > 0 && (
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+                  </View>
+                )}
+
+                <Text style={styles.sectionTitle}>Active</Text>
+                {activeMeds.length === 0
+                  ? emptyState('medical-outline', 'Nothing due', query ? 'No matches for your search.' : 'All caught up for today.')
+                  : activeMeds.map(renderMedCard)}
+
+                {doneMeds.length > 0 && (
+                  <>
+                    <Text style={styles.sectionTitle}>Completed</Text>
+                    {doneMeds.map(renderMedCard)}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ── Reminders ── */}
+            {activeTab === 'reminders' && (
+              <>
+                <Text style={styles.sectionTitle}>Reminder schedule</Text>
+                {visible.length === 0
+                  ? emptyState('alarm-outline', 'No reminders set', 'Add a medication to set up reminders.')
+                  : visible.map((med, index) => (
+                    <Animated.View key={med.id} entering={FadeInDown.delay(index * 50).duration(280)}>
+                      <View style={styles.reminderCard}>
+                        <View style={styles.reminderTimeCol}>
+                          <Text style={styles.reminderTime}>{med.reminderTime}</Text>
                         </View>
-                        {(med.doseStatus === 'PENDING' || !med.doseStatus) && (
-                          <View style={styles.actionRow}>
-                            <TouchableOpacity style={styles.takeBtn} onPress={() => handleDoseStatus(med.id, 'TAKEN')}>
-                              <LinearGradient colors={GlassTheme.gradients.headerBg} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} />
-                              <Ionicons name="checkmark" size={14} color="#FFF" />
-                              <Text style={styles.takeBtnText}>Take Now</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.snoozeBtn} onPress={() => handleDoseStatus(med.id, 'SNOOZED')}>
-                              <Ionicons name="alarm-outline" size={14} color={GlassTheme.colors.textMuted} />
-                              <Text style={styles.snoozeBtnText}>Snooze</Text>
-                            </TouchableOpacity>
-                          </View>
-                        )}
-                      </GlassCard>
+                        <View style={styles.reminderBar} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.medName}>{med.name}</Text>
+                          <Text style={styles.medMeta}>{[med.dosage, med.frequency].filter(Boolean).join(' · ')}</Text>
+                          {!!med.instructions && <Text style={styles.reminderNote}>{med.instructions}</Text>}
+                        </View>
+                        <Ionicons name="notifications-outline" size={18} color={GlassTheme.colors.textDim} />
+                      </View>
                     </Animated.View>
-                  );
-                })
-              )}
-            </>
-          )}
+                  ))}
+                <View style={styles.noteCard}>
+                  <Ionicons name="information-circle-outline" size={17} color={GlassTheme.colors.textMuted} />
+                  <Text style={styles.noteText}>
+                    Push notifications alert you at each reminder time. Make sure notifications are enabled in your device settings.
+                  </Text>
+                </View>
+              </>
+            )}
 
-          {/* ── Reminders Tab ── */}
-          {activeTab === 'reminders' && (
-            <>
-              <Text style={styles.sectionTitle}>Reminder Schedule</Text>
-              {medications.length === 0 ? (
-                <GlassCard variant="flat" style={styles.emptyCard}>
-                  <Ionicons name="alarm-outline" size={40} color={GlassTheme.colors.textDim} style={{ alignSelf: 'center' }} />
-                  <Text style={styles.emptyTitle}>No reminders set</Text>
-                  <Text style={styles.emptyHint}>Add a medication to set up reminders</Text>
-                </GlassCard>
-              ) : (
-                medications.map((med, index) => (
-                  <Animated.View key={med.id} entering={FadeInDown.delay(index * 60).duration(300)}>
-                    <GlassCard style={styles.reminderCard}>
-                      <View style={styles.reminderTimeCol}>
-                        <Text style={styles.reminderTime}>{med.reminderTime}</Text>
-                        <View style={styles.reminderDot} />
+            {/* ── History ── */}
+            {activeTab === 'history' && (
+              <>
+                <Text style={styles.sectionTitle}>Current status</Text>
+                {visible.length === 0
+                  ? emptyState('time-outline', 'No history yet', 'Your dose history will appear here.')
+                  : (
+                    <>
+                      <View style={styles.noteCard}>
+                        <Ionicons name="information-circle-outline" size={17} color={GlassTheme.colors.textMuted} />
+                        <Text style={styles.noteText}>
+                          This shows each medication&apos;s current status, not a day-by-day log yet. Dose-by-dose history is coming once it&apos;s wired up on the backend.
+                        </Text>
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.medName}>{med.name}</Text>
-                        <Text style={styles.medDosage}>{med.dosage}</Text>
-                        <View style={styles.reminderFreqRow}>
-                          <Ionicons name="repeat-outline" size={12} color={GlassTheme.colors.primary} />
-                          <Text style={styles.reminderFreqText}>{med.frequency}</Text>
-                        </View>
-                        {med.instructions ? (
-                          <Text style={styles.reminderInstructions}>{med.instructions}</Text>
-                        ) : null}
-                      </View>
-                      <View style={styles.reminderBell}>
-                        <Ionicons name="notifications" size={18} color={GlassTheme.colors.primary} />
-                      </View>
-                    </GlassCard>
-                  </Animated.View>
-                ))
-              )}
-              <GlassCard variant="flat" style={styles.reminderTip}>
-                <Ionicons name="information-circle-outline" size={18} color={GlassTheme.colors.primary} />
-                <Text style={styles.reminderTipText}>
-                  Push notifications will alert you at your set reminder times. Make sure notifications are enabled in your device settings.
-                </Text>
-              </GlassCard>
-            </>
-          )}
-
-          {/* ── History Tab ── */}
-          {activeTab === 'history' && (
-            <>
-              <Text style={styles.sectionTitle}>Current Status</Text>
-              {medications.length === 0 ? (
-                <GlassCard variant="flat" style={styles.emptyCard}>
-                  <Ionicons name="time-outline" size={40} color={GlassTheme.colors.textDim} style={{ alignSelf: 'center' }} />
-                  <Text style={styles.emptyTitle}>No history yet</Text>
-                  <Text style={styles.emptyHint}>Your dose history will appear here</Text>
-                </GlassCard>
-              ) : (
-                <>
-                  <GlassCard variant="flat" style={styles.reminderTip}>
-                    <Ionicons name="information-circle-outline" size={18} color={GlassTheme.colors.primary} />
-                    <Text style={styles.reminderTipText}>
-                      This shows each medication's current status, not a day-by-day log yet. Real
-                      dose-by-dose history tracking is coming once it's wired up on the backend.
-                    </Text>
-                  </GlassCard>
-
-                  {/* Per-medication current status */}
-                  {medications.map((med, index) => {
-                    const s = statusColors[med.doseStatus ?? 'PENDING'];
-                    const takenAt = med.doseStatus === 'TAKEN' ? med.reminderTime : null;
-                    return (
-                      <Animated.View key={med.id} entering={FadeInDown.delay(index * 60).duration(300)}>
-                        <GlassCard style={styles.historyCard}>
-                          <View style={styles.historyLeft}>
-                            <View style={[styles.historyIconWrap, { backgroundColor: s.bg }]}>
-                              <Ionicons
-                                name={med.doseStatus === 'TAKEN' ? 'checkmark-circle' : med.doseStatus === 'SNOOZED' ? 'alarm' : 'ellipse-outline'}
-                                size={20}
-                                color={s.text}
-                              />
-                            </View>
-                            <View style={styles.historyLine} />
-                          </View>
-                          <View style={{ flex: 1, paddingBottom: 16 }}>
-                            <Text style={styles.medName}>{med.name}</Text>
-                            <Text style={styles.medDosage}>{med.dosage} · {med.frequency}</Text>
-                            <View style={styles.historyMeta}>
+                      {visible.map((med, index) => {
+                        const s = statusColors[med.doseStatus ?? 'PENDING'];
+                        return (
+                          <Animated.View key={med.id} entering={FadeInDown.delay(index * 50).duration(280)}>
+                            <View style={styles.historyRow}>
+                              <View style={[styles.historyIcon, { backgroundColor: s.bg }]}>
+                                <Ionicons
+                                  name={med.doseStatus === 'TAKEN' ? 'checkmark-circle' : med.doseStatus === 'SNOOZED' ? 'alarm' : 'ellipse-outline'}
+                                  size={18}
+                                  color={s.text}
+                                />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.medName}>{med.name}</Text>
+                                <Text style={styles.medMeta}>{[med.dosage, med.frequency].filter(Boolean).join(' · ')}</Text>
+                              </View>
                               <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
                                 <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
                               </View>
-                              {takenAt && (
-                                <Text style={styles.historyTime}>at {takenAt}</Text>
-                              )}
                             </View>
-                          </View>
-                        </GlassCard>
-                      </Animated.View>
-                    );
-                  })}
-                </>
-              )}
-            </>
-          )}
-        </ScrollView>
+                          </Animated.View>
+                        );
+                      })}
+                    </>
+                  )}
+              </>
+            )}
+          </ScrollView>
+        )}
+      </SheetBody>
 
-        {/* ── Add Medication Modal ── */}
-        <Modal visible={modalVisible} animationType="slide" transparent>
-          <KeyboardAvoidingView
-            style={styles.modalOverlay}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.modalSheet}>
-              <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>{editingId ? 'Edit Medication' : 'Add Medication'}</Text>
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                style={{ flexShrink: 1 }}
-              >
-                <View style={{ gap: 14 }}>
-                  {/* Drug name with autocomplete */}
-                  <View>
-                    <GlassInput
-                      label="Medication Name"
-                      icon="medical-outline"
-                      value={form.name}
-                      onChangeText={handleNameChange}
-                      placeholder="e.g. Metformin — start typing to search"
-                      autoCorrect={false}
-                    />
-                    {showSuggestions && (
-                      <View style={styles.suggestionsBox}>
-                        {suggestions.map((s) => (
-                          <TouchableOpacity
-                            key={s.id}
-                            style={styles.suggestionRow}
-                            onPress={() => selectSuggestion(s)}
-                          >
-                            <Ionicons name="medical-outline" size={14} color={GlassTheme.colors.primary} style={{ marginTop: 1 }} />
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.suggestionName}>{s.name}</Text>
-                              {s.genericName && s.genericName !== s.name && (
-                                <Text style={styles.suggestionGeneric}>{s.genericName}</Text>
-                              )}
-                            </View>
-                            <View style={[styles.sourceBadge, s.source === 'openFDA' && styles.sourceBadgeFda]}>
-                              <Text style={[styles.sourceText, s.source === 'openFDA' && styles.sourceTextFda]}>
-                                {s.source === 'openFDA' ? 'FDA' : 'Local'}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                  <GlassInput label="Dosage" icon="fitness-outline" value={form.dosage} onChangeText={(t) => setForm({ ...form, dosage: t })} placeholder="e.g. 500mg" />
-
-                  <View>
-                    <Text style={styles.freqLabel}>Frequency</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                      <View style={styles.freqRow}>
-                        {FREQ_OPTIONS.map((f) => (
-                          <TouchableOpacity
-                            key={f}
-                            style={[styles.freqChip, form.frequency === f && styles.freqChipActive]}
-                            onPress={() => handleFrequencyChange(f)}
-                          >
-                            <Text style={[styles.freqChipText, form.frequency === f && styles.freqChipTextActive]}>{f}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </View>
-
-                  <View>
-                    <Text style={styles.freqLabel}>
-                      Reminder Time{form.reminderTimes.length > 1 ? 's' : ''}
-                    </Text>
-                    <View style={{ gap: 8, marginTop: 8 }}>
-                      {form.reminderTimes.map((time, idx) => (
-                        <TouchableOpacity
-                          key={idx}
-                          style={styles.timeChip}
-                          onPress={() => setTimePickerIndex(idx)}
-                        >
-                          <Ionicons name="alarm-outline" size={16} color={GlassTheme.colors.primary} />
-                          <Text style={styles.timeChipText}>{formatTimeLabel(time)}</Text>
-                          <Ionicons name="chevron-forward" size={14} color={GlassTheme.colors.textDim} />
-                        </TouchableOpacity>
-                      ))}
+      {/* ── Add / Edit Medication Sheet ──
+          Uses FormSheet (plain RN Modal + ScrollView) rather than the
+          gorhom-based AppBottomSheet: this form has to scroll reliably while
+          the keyboard is up, and gorhom's pan-gesture arbitration and content
+          measurement kept preventing that. See FormSheet's own javadoc. */}
+      <FormSheet
+        visible={modalVisible}
+        onClose={() => { setModalVisible(false); resetForm(); }}
+        title={editingId ? 'Edit Medication' : 'Add Medication'}
+        height="70%"
+        action={{
+          label: editingId ? 'Save' : 'Add',
+          onPress: handleSave,
+          loading: saving,
+          disabled: !form.name.trim() || !form.dosage.trim(),
+        }}
+      >
+        {/* No `gap` here on purpose: GlassInput already carries its own
+            14px bottom margin, so a container gap stacked on top of it and
+            produced ~28px between fields — a lot of wasted height in a
+            fixed 70% sheet. Non-input groups use `fieldGroup` to match that
+            same 14px, giving one consistent rhythm down the form. */}
+        <View>
+          <View>
+            <GlassInput
+              label="Medication Name"
+              icon="medical-outline"
+              value={form.name}
+              onChangeText={handleNameChange}
+              placeholder="e.g. Metformin — start typing to search"
+              autoCorrect={false}
+            />
+            {showSuggestions && (
+              <View style={styles.suggestionsBox}>
+                {suggestions.map((s) => (
+                  <TouchableOpacity key={s.id} style={styles.suggestionRow} onPress={() => selectSuggestion(s)}>
+                    <Ionicons name="medical-outline" size={14} color={GlassTheme.colors.primary} style={{ marginTop: 1 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.suggestionName}>{s.name}</Text>
+                      {s.genericName && s.genericName !== s.name && (
+                        <Text style={styles.suggestionGeneric}>{s.genericName}</Text>
+                      )}
                     </View>
-                  </View>
-
-                  <View>
-                    <Text style={styles.freqLabel}>Instructions (optional)</Text>
-                    <TextInput
-                      placeholder="e.g. Take with food"
-                      placeholderTextColor={GlassTheme.colors.textDim}
-                      value={form.instructions}
-                      onChangeText={(t) => setForm({ ...form, instructions: t })}
-                      style={styles.textArea}
-                      multiline
-                    />
-                  </View>
-                </View>
-              </ScrollView>
-              <View style={styles.modalActions}>
-                <GlassButton
-                  label="Cancel"
-                  variant="ghost"
-                  onPress={() => { setModalVisible(false); resetForm(); }}
-                  style={{ flex: 1 }}
-                />
-                <GlassButton
-                  label={editingId ? 'Save Changes' : 'Save Medication'}
-                  onPress={handleSave}
-                  loading={saving}
-                  style={{ flex: 1 }}
-                />
+                    <View style={[styles.sourceBadge, s.source === 'openFDA' && styles.sourceBadgeFda]}>
+                      <Text style={[styles.sourceText, s.source === 'openFDA' && styles.sourceTextFda]}>
+                        {s.source === 'openFDA' ? 'FDA' : 'Local'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+            )}
+          </View>
 
-        <TimePickerModal
-          visible={timePickerIndex !== null}
-          initialTime={timePickerIndex !== null ? form.reminderTimes[timePickerIndex] : undefined}
-          onCancel={() => setTimePickerIndex(null)}
-          onConfirm={(time) => {
-            setForm((prev) => {
-              const next = [...prev.reminderTimes];
-              next[timePickerIndex!] = time;
-              return { ...prev, reminderTimes: next };
-            });
-            setTimePickerIndex(null);
-          }}
-        />
-      </SafeAreaView>
-    </GlassBackground>
+          <GlassInput label="Dosage" icon="fitness-outline" value={form.dosage} onChangeText={(t) => setForm({ ...form, dosage: t })} placeholder="e.g. 500mg" />
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Frequency</Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              <View style={styles.chipRow}>
+                {FREQ_OPTIONS.map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[styles.chip, form.frequency === f && styles.chipActive]}
+                    onPress={() => handleFrequencyChange(f)}
+                  >
+                    <Text style={[styles.chipText, form.frequency === f && styles.chipTextActive]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>
+              Reminder Time{form.reminderTimes.length > 1 ? 's' : ''}
+            </Text>
+            <View style={{ gap: 8 }}>
+              {form.reminderTimes.map((time, idx) => (
+                <TouchableOpacity key={idx} style={styles.timeChip} onPress={() => setTimePickerIndex(idx)}>
+                  <Ionicons name="alarm-outline" size={16} color={GlassTheme.colors.primary} />
+                  <Text style={styles.timeChipText}>{formatTimeLabel(time)}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={GlassTheme.colors.textDim} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>
+              Instructions <Text style={styles.optionalTag}>optional</Text>
+            </Text>
+            <TextInput
+              placeholder="e.g. Take with food"
+              placeholderTextColor={GlassTheme.colors.textDim}
+              value={form.instructions}
+              onChangeText={(t) => setForm({ ...form, instructions: t })}
+              style={styles.textArea}
+              multiline
+            />
+          </View>
+
+        </View>
+      </FormSheet>
+
+      <TimePickerModal
+        visible={timePickerIndex !== null}
+        initialTime={timePickerIndex !== null ? form.reminderTimes[timePickerIndex] : undefined}
+        onCancel={() => setTimePickerIndex(null)}
+        onConfirm={(time) => {
+          setForm((prev) => {
+            const next = [...prev.reminderTimes];
+            next[timePickerIndex!] = time;
+            return { ...prev, reminderTimes: next };
+          });
+          setTimePickerIndex(null);
+        }}
+      />
+    </ScreenRoot>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { padding: 20, paddingBottom: 120, gap: 4 },
-  loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  tabsWrap: { paddingHorizontal: 20, paddingBottom: 4 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 4 },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  screenLabel: { fontSize: 10, fontWeight: '700', color: GlassTheme.colors.primary, letterSpacing: 1.5, marginBottom: 2 },
-  title: { fontSize: 26, fontWeight: '800', color: GlassTheme.colors.text },
-  addBtn: {
-    width: 46, height: 46, borderRadius: 23,
-    overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
-    ...GlassTheme.shadow.md,
+  sectionTitle: {
+    fontSize: 16, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 20, marginBottom: 10,
   },
 
-  progressBanner: {
-    borderRadius: GlassTheme.radius.xl,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 4,
+  // ── Progress strip ──
+  progressRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+  progressLabel: { fontSize: 12, color: GlassTheme.colors.textMuted, fontWeight: '600' },
+  progressValue: { fontSize: 15, fontWeight: '700', color: GlassTheme.colors.text, marginTop: 2 },
+  progressPct: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.primary },
+  progressBarBg: {
+    height: 5, borderRadius: 3, marginTop: 10,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
     overflow: 'hidden',
   },
-  progressBubble: {
-    position: 'absolute', top: -40, right: -20,
-    width: 120, height: 120, borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  progressTitle: { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600', marginBottom: 4 },
-  progressFraction: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 10 },
-  progressBarBg: {
-    height: 6, backgroundColor: 'rgba(255,255,255,0.25)',
-    borderRadius: 3, overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: 6, backgroundColor: '#FFFFFF', borderRadius: 3,
-  },
-  progressCircle: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-    zIndex: 1,
-  },
-  progressPct: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  progressBarFill: { height: '100%', borderRadius: 3, backgroundColor: GlassTheme.colors.primary },
 
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: GlassTheme.colors.text, marginTop: 20, marginBottom: 12 },
-
-  emptyCard: { alignItems: 'center', gap: 8, paddingVertical: 28 },
-  emptyTitle: { color: GlassTheme.colors.textMuted, fontSize: 15, fontWeight: '600' },
-  emptyHint: { color: GlassTheme.colors.textDim, fontSize: 13 },
-
-  medCard: { marginBottom: 10, gap: 12 },
-  medRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  medIconWrap: {
-    width: 46, height: 46, borderRadius: 14,
+  // ── Medication card ──
+  medCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md,
+    backgroundColor: GlassTheme.colors.surface,
+    padding: 14,
+    marginBottom: 10,
+  },
+  medTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  medThumb: {
+    width: 42, height: 42, borderRadius: 12,
     backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  medName: { color: GlassTheme.colors.text, fontWeight: '700', fontSize: 15 },
-  medDosage: { color: GlassTheme.colors.textMuted, fontSize: 12, marginTop: 2 },
-  medTime: { color: GlassTheme.colors.textDim, fontSize: 11, marginTop: 3 },
-  statusBadge: { borderRadius: GlassTheme.radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  cardIconRow: { flexDirection: 'row', gap: 12, paddingRight: 2 },
-
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  takeBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderRadius: GlassTheme.radius.md, paddingVertical: 10, overflow: 'hidden',
-  },
-  takeBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
-  snoozeBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    borderRadius: GlassTheme.radius.md, paddingVertical: 10,
-    backgroundColor: GlassTheme.colors.surfaceAlt,
-    borderWidth: 1, borderColor: GlassTheme.colors.divider,
-  },
-  snoozeBtnText: { color: GlassTheme.colors.textMuted, fontWeight: '600', fontSize: 13 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, paddingBottom: 36,
-    gap: 16, maxHeight: '88%',
-    ...GlassTheme.shadow.lg,
-  },
-  modalHandle: {
-    width: 40, height: 4, borderRadius: 2,
+  medName: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text },
+  medMeta: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
+  medTime: { fontSize: 12, fontWeight: '700', color: GlassTheme.colors.text },
+  medDivider: {
+    height: StyleSheet.hairlineWidth,
     backgroundColor: GlassTheme.colors.divider,
-    alignSelf: 'center', marginBottom: 4,
+    marginVertical: 11,
   },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.text },
+  medPurpose: { fontSize: 12, color: GlassTheme.colors.textMuted, lineHeight: 17 },
+  medPurposeLabel: { fontWeight: '700', color: GlassTheme.colors.text },
+  medActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  iconBtn: { padding: 4 },
 
-  freqLabel: { fontSize: 12, fontWeight: '600', color: GlassTheme.colors.textMuted },
-  freqRow: { flexDirection: 'row', gap: 8 },
-  freqChip: {
+  statusBadge: { borderRadius: GlassTheme.radius.pill, paddingHorizontal: 9, paddingVertical: 3 },
+  statusText: { fontSize: 10, fontWeight: '700' },
+
+  takeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: GlassTheme.colors.primary,
+    borderRadius: GlassTheme.radius.sm, paddingVertical: 9, paddingHorizontal: 14,
+  },
+  takeBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  snoozeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    borderRadius: GlassTheme.radius.sm, paddingVertical: 9, paddingHorizontal: 14,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    flex: 1,
+  },
+  snoozeBtnText: { color: GlassTheme.colors.textMuted, fontWeight: '600', fontSize: 12 },
+
+  // ── Reminders ──
+  reminderCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+    padding: 14, marginBottom: 10,
+  },
+  reminderTimeCol: { minWidth: 46 },
+  reminderTime: { fontSize: 13, fontWeight: '800', color: GlassTheme.colors.primary },
+  reminderBar: { width: 2, alignSelf: 'stretch', borderRadius: 1, backgroundColor: GlassTheme.colors.divider },
+  reminderNote: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: 4 },
+
+  // ── History ──
+  historyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+    padding: 14, marginBottom: 10,
+  },
+  historyIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+
+  // ── Shared ──
+  noteCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderRadius: GlassTheme.radius.md, padding: 13, marginTop: 6, marginBottom: 10,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+  },
+  noteText: { flex: 1, fontSize: 12, color: GlassTheme.colors.textMuted, lineHeight: 18 },
+
+  emptyCard: {
+    alignItems: 'center', gap: 6, paddingVertical: 34,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+  },
+  emptyTitle: { color: GlassTheme.colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 },
+  emptyHint: { color: GlassTheme.colors.textDim, fontSize: 12 },
+
+  // ── Form ──
+  // Matches GlassInput's own built-in bottom margin so inputs and non-input
+  // groups sit on the same vertical rhythm.
+  fieldGroup: { marginBottom: 14 },
+  fieldLabel: {
+    fontSize: 12, fontWeight: '600', color: GlassTheme.colors.textMuted,
+    marginBottom: 8,
+  },
+  optionalTag: { fontWeight: '500', color: GlassTheme.colors.textDim },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  chip: {
     paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: GlassTheme.radius.pill,
     backgroundColor: GlassTheme.colors.surfaceAlt,
-    borderWidth: 1, borderColor: GlassTheme.colors.divider,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
   },
-  freqChipActive: {
-    backgroundColor: GlassTheme.colors.primary,
-    borderColor: GlassTheme.colors.primary,
-  },
-  freqChipText: { fontSize: 13, color: GlassTheme.colors.textMuted, fontWeight: '600' },
-  freqChipTextActive: { color: '#FFFFFF' },
+  chipActive: { backgroundColor: GlassTheme.colors.primary, borderColor: GlassTheme.colors.primary },
+  chipText: { fontSize: 13, color: GlassTheme.colors.textMuted, fontWeight: '600' },
+  chipTextActive: { color: '#FFFFFF' },
 
   timeChip: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 14, paddingVertical: 12,
     borderRadius: GlassTheme.radius.sm,
     backgroundColor: GlassTheme.colors.surfaceAlt,
-    borderWidth: 1.5, borderColor: GlassTheme.colors.divider,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
   },
   timeChipText: { flex: 1, fontSize: 14, fontWeight: '600', color: GlassTheme.colors.text },
 
   textArea: {
-    marginTop: 8,
     backgroundColor: GlassTheme.colors.surfaceAlt,
     borderRadius: GlassTheme.radius.sm,
     padding: 14, fontSize: 14,
     color: GlassTheme.colors.text,
-    borderWidth: 1.5, borderColor: GlassTheme.colors.divider,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
     minHeight: 72, textAlignVertical: 'top',
   },
-  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
 
-  // ── Tab bar ──
-  tabBar: {
-    flexDirection: 'row', backgroundColor: GlassTheme.colors.surfaceAlt,
-    borderRadius: GlassTheme.radius.lg, padding: 4, marginTop: 16, marginBottom: 4,
-    borderWidth: 1, borderColor: GlassTheme.colors.divider,
-  },
-  tabBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, paddingVertical: 9, borderRadius: GlassTheme.radius.md,
-  },
-  tabBtnActive: { backgroundColor: '#FFFFFF', ...GlassTheme.shadow.sm },
-  tabBtnText: { fontSize: 12, fontWeight: '600', color: GlassTheme.colors.textMuted },
-  tabBtnTextActive: { color: GlassTheme.colors.primary },
-
-  // ── Reminders ──
-  reminderCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 10 },
-  reminderTimeCol: { alignItems: 'center', gap: 6, paddingTop: 2, minWidth: 44 },
-  reminderTime: { fontSize: 13, fontWeight: '800', color: GlassTheme.colors.primary },
-  reminderDot: {
-    width: 8, height: 8, borderRadius: 4,
-    backgroundColor: GlassTheme.colors.primary,
-  },
-  reminderFreqRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  reminderFreqText: { fontSize: 11, color: GlassTheme.colors.primary, fontWeight: '600' },
-  reminderInstructions: { fontSize: 11, color: GlassTheme.colors.textDim, marginTop: 4, fontStyle: 'italic' },
-  reminderBell: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: GlassTheme.colors.primaryLight,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  reminderTip: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    marginTop: 8, padding: 14,
-  },
-  reminderTipText: { flex: 1, fontSize: 12, color: GlassTheme.colors.textMuted, lineHeight: 18 },
-
-  // ── History ──
-  historyCard: { flexDirection: 'row', gap: 12, paddingBottom: 0 },
-  historyLeft: { alignItems: 'center', paddingTop: 4 },
-  historyIconWrap: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  historyLine: {
-    flex: 1, width: 2, backgroundColor: GlassTheme.colors.divider,
-    marginTop: 4, minHeight: 20,
-  },
-  historyMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  historyTime: { fontSize: 11, color: GlassTheme.colors.textDim },
-
-  // ── Drug autocomplete ──
   suggestionsBox: {
     marginTop: 4,
     backgroundColor: '#FFFFFF',
     borderRadius: GlassTheme.radius.md,
-    borderWidth: 1.5,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: GlassTheme.colors.divider,
     overflow: 'hidden',
     ...GlassTheme.shadow.md,
   },
   suggestionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: GlassTheme.colors.divider,
   },
-  suggestionName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: GlassTheme.colors.text,
-  },
-  suggestionGeneric: {
-    fontSize: 11,
-    color: GlassTheme.colors.textMuted,
-    marginTop: 1,
-  },
+  suggestionName: { fontSize: 13, fontWeight: '600', color: GlassTheme.colors.text },
+  suggestionGeneric: { fontSize: 11, color: GlassTheme.colors.textMuted, marginTop: 1 },
   sourceBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingHorizontal: 7, paddingVertical: 3,
     borderRadius: GlassTheme.radius.pill,
     backgroundColor: GlassTheme.colors.primaryLight,
   },
-  sourceBadgeFda: {
-    backgroundColor: GlassTheme.colors.amberLight,
-  },
-  sourceText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: GlassTheme.colors.primary,
-  },
-  sourceTextFda: {
-    color: GlassTheme.colors.amber,
-  },
+  sourceBadgeFda: { backgroundColor: GlassTheme.colors.amberLight },
+  sourceText: { fontSize: 9, fontWeight: '700', color: GlassTheme.colors.primary },
+  sourceTextFda: { color: GlassTheme.colors.amber },
 });

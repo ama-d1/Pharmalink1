@@ -1,0 +1,20 @@
+Resolved "preview" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "preview" environment on EAS.
+Environment variables loaded from the "preview" build profile "env" configuration: EXPO_PUBLIC_API_BASE_URL.
+
+
+
+✔ Using remote Android credentials (Expo server)
+✔ Using Keystore from configuration: Build Credentials kZ1z0kw9HZ (default)
+
+Compressing project files and uploading to EAS Build. Learn more: https://expo.fyi/eas-build-archive
+- Compressing project files
+- Uploading to EAS Build (0 / 2.6 MB)
+Failed to upload metadata to EAS Build
+
+Reason: request to https://storage.googleapis.com/turtle-v2-projects-metadata/production/a179d302-6d47-4169-bf15-26413e8e267c/b20faeff-0d60-436e-862b-b92f73a40488?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260804%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260804T025426Z&X-Goog-Expires=3600&X-Goog-SignedHeaders=host%3Bx-goog-content-length-range&X-Goog-Signature=6c18a9c0b55a58a0d3d0ea50f40b47c285007d757a544c68264647b7b0bab5cb8a1b9b2fdd67c5b9caa7115b2bbcac014d6b48b16a5f5b4352d68f26061b58706b5d9b626295618a13c7e09b1e3c28bc1ee308075a8936f3fe4777b40b223ec7c0825cd252ead85635e749a4b9fadfd03c27b9fd2ee7dd98b8be34d7982a876e62190e7aaf7bdf8d4f23ca45f2f08d55ead17c652d8452706e093585e1b7a08fc4537da63dec42fad3bdc4efda5299b15433e1b06f560c85e9caf538381ffeba2ac7c20d6c46d52065a20fd0a9d86cedb9a47339db442e50ca8a4327d1aaea2b94f0a6f4a83f557938420327ae187c9afdd3a5ae40149bdef6f750263563bf5c failed, reason: getaddrinfo ENOENT storage.googleapis.com
+✖ Uploading to EAS Build (128 KB / 2.6 MB)
+Failed to upload the project tarball to EAS Build
+
+Reason: request to https://storage.googleapis.com/turtle-v2-projects/production/a179d302-6d47-4169-bf15-26413e8e267c/4851698c-8c1b-4cba-ae11-a6f119584a51?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260804%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260804T025426Z&X-Goog-Expires=3600&X-Goog-SignedHeaders=host%3Bx-goog-content-length-range&X-Goog-Signature=7ea6a74a39eff97d8be59ec8283c34e0a6852f0c4ca0bad17420ef3ddcbaa05e96284f206e55dca922b52d6b70f3f27e719152582286de916c87c0113284f1a5b9dfbc79508afd6b657ecbb0c883e96bd923c93d1bb0709e8b50c62fdaa07fb09d77b922984aacad78f51575188abf0b629c36b1ac08582b22e5520aae01cf51382245d856221b4561e9eb7f694431b4cb4172029ef03d28e53e3fe204f013318e5de61a863f7aa6ded08b5a258309dcf5008cd228bb118a502434c0ff4f2a2d2451096f27f6d85a4ad7adf8f7eb820a2c7f58ed1be7f1e70795887739760a326ead464caad1dff3969bbdc7a8590035180dc07393a3f9264f1710a0f1c923c6 failed, reason: getaddrinfo ENOENT storage.googleapis.com
+    Error: build command failed.

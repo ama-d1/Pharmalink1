@@ -2,7 +2,9 @@ import { API } from '@/constants/api';
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
 import { getAuthHeaders } from '@/utils/authHeaders';
 
-const BASE_URL = API.auth;
+// Reads API.auth at call time rather than freezing it in a module-level
+// const — API's properties are getters now, so a server-URL change (or the
+// startup hydration of a saved override) is picked up. See constants/api.ts.
 
 // FIXED: every function below used to call plain fetch() with no timeout at
 // all — unlike the rest of the app's service files, which already switched
@@ -19,7 +21,7 @@ const BASE_URL = API.auth;
 export const loginUser = async (email: string, password: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/login`, {
+    response = await fetchWithTimeout(`${API.auth}/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -47,7 +49,7 @@ export const registerUser = async (
 ) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/register`, {
+    response = await fetchWithTimeout(`${API.auth}/register`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -68,7 +70,7 @@ export const registerUser = async (
 export const forgotPassword = async (email: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/forgot-password`, {
+    response = await fetchWithTimeout(`${API.auth}/forgot-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -91,7 +93,7 @@ export const forgotPassword = async (email: string) => {
 export const resetPassword = async (token: string, password: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/reset-password`, {
+    response = await fetchWithTimeout(`${API.auth}/reset-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, password }),
@@ -122,7 +124,7 @@ export const resetPassword = async (token: string, password: string) => {
 export const verifyTwoFactorCode = async (userId: string, code: string) => {
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${BASE_URL}/2fa/verify`, {
+    response = await fetchWithTimeout(`${API.auth}/2fa/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, code }),
@@ -140,7 +142,7 @@ export const verifyTwoFactorCode = async (userId: string, code: string) => {
 
 export const resendTwoFactorCode = async (userId: string) => {
   try {
-    await fetchWithTimeout(`${BASE_URL}/2fa/resend`, {
+    await fetchWithTimeout(`${API.auth}/2fa/resend`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId }),
@@ -158,7 +160,7 @@ export const resendTwoFactorCode = async (userId: string) => {
 
 export const getTwoFactorStatus = async (): Promise<boolean> => {
   try {
-    const res = await fetchWithTimeout(`${BASE_URL}/2fa`, { headers: await getAuthHeaders() });
+    const res = await fetchWithTimeout(`${API.auth}/2fa`, { headers: await getAuthHeaders() });
     if (!res.ok) return false;
     const data = await res.json();
     return !!data.enabled;
@@ -168,7 +170,7 @@ export const getTwoFactorStatus = async (): Promise<boolean> => {
 };
 
 export const setTwoFactorEnabled = async (enabled: boolean): Promise<boolean> => {
-  const res = await fetchWithTimeout(`${BASE_URL}/2fa`, {
+  const res = await fetchWithTimeout(`${API.auth}/2fa`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
     body: JSON.stringify({ enabled }),

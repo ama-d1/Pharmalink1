@@ -8,23 +8,27 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
+  StatusBar,
+  TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassButton } from '@/components/glass/GlassButton';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { LocationPickerModal } from '@/components/ui/LocationPickerModal';
+import { ScreenRoot, DarkHeader, SheetBody } from '@/components/ui/ScreenShell';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { useCart } from '@/context/CartContext';
 import { LocationSuggestion, getCurrentLocation, reverseGeocode } from '@/services/locationService';
 import { getPhoneNumberError } from '@/utils/validation';
 
 type DeliverySpeed = 'standard' | 'express' | 'priority';
 type FulfillmentType = 'PICKUP' | 'DELIVERY';
+const FULFILLMENT_TABS = [
+  { key: 'DELIVERY', label: 'Delivery' },
+  { key: 'PICKUP', label: 'Pickup' },
+] as const;
 
 // REWRITTEN 2026-07-23 — this used to be a form the user only reached AFTER
 // paying (an alert offering "Set Delivery Options" post-payment), and it
@@ -36,8 +40,13 @@ type FulfillmentType = 'PICKUP' | 'DELIVERY';
 // payment.tsx via route params. No delivery-service call happens here
 // anymore — that now happens automatically after a successful payment (see
 // payment.tsx), not as a manual step the user has to remember to do.
+//
+// Layout rebuilt to the shared ink-header + white-sheet shell; the two big
+// toggle cards became the standard segmented control so this screen picks up
+// the same control vocabulary as the rest of the app.
 export default function CheckoutFulfillmentScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { address } = useLocalSearchParams<{ address: string }>();
   const { getCartTotal, getCartPharmacy } = useCart();
 
@@ -84,14 +93,15 @@ export default function CheckoutFulfillmentScreen() {
   }, []);
 
   const deliveryOptions = [
-    { id: 'standard' as DeliverySpeed, name: 'Standard Delivery', time: '2-3 hours', price: 5.0, icon: 'bicycle', description: 'Regular delivery within the city' },
-    { id: 'express' as DeliverySpeed, name: 'Express Delivery', time: '45-60 minutes', price: 15.0, icon: 'car-sport', description: 'Fast delivery for urgent needs' },
-    { id: 'priority' as DeliverySpeed, name: 'Priority Delivery', time: '20-30 minutes', price: 25.0, icon: 'airplane', description: 'Emergency delivery service' },
+    { id: 'standard' as DeliverySpeed, name: 'Standard Delivery', time: '2-3 hours', price: 5.0, icon: 'bicycle' as const, description: 'Regular delivery within the city' },
+    { id: 'express' as DeliverySpeed, name: 'Express Delivery', time: '45-60 minutes', price: 15.0, icon: 'car-sport' as const, description: 'Fast delivery for urgent needs' },
+    { id: 'priority' as DeliverySpeed, name: 'Priority Delivery', time: '20-30 minutes', price: 25.0, icon: 'airplane' as const, description: 'Emergency delivery service' },
   ];
 
   const selectedOption = deliveryOptions.find((o) => o.id === selectedSpeed);
   const deliveryFee = fulfillmentType === 'DELIVERY' ? (selectedOption?.price ?? 0) : 0;
   const total = subtotal + deliveryFee;
+  const isPickup = fulfillmentType === 'PICKUP';
 
   const handleContinue = () => {
     const phoneValidationError = getPhoneNumberError(phoneNumber);
@@ -123,232 +133,238 @@ export default function CheckoutFulfillmentScreen() {
   const handleLocationSelect = (location: LocationSuggestion) => setDeliveryAddress(location.address);
 
   return (
-    <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Pickup or Delivery?</Text>
-        </View>
+    <ScreenRoot>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <DarkHeader
+        onBack={() => router.back()}
+        title="Checkout"
+        eyebrow="STEP 2 OF 3"
+        heading="How do you want it?"
+      />
+      <SheetBody>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior="padding"
+        >
+          <View style={styles.tabsWrap}>
+            <SegmentedTabs
+              tabs={FULFILLMENT_TABS}
+              value={fulfillmentType}
+              onChange={setFulfillmentType}
+            />
+          </View>
+          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {/* ── Where ── */}
+            <Text style={styles.sectionTitle}>{isPickup ? 'Pick up from' : 'Deliver to'}</Text>
+            {isPickup ? (
+              <View style={styles.card}>
+                <View style={styles.cardRow}>
+                  <View style={styles.cardIcon}>
+                    <Ionicons name="storefront" size={18} color={GlassTheme.colors.primary} />
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            {/* Fulfillment type toggle */}
-            <View style={styles.toggleRow}>
-              <TouchableOpacity
-                style={[styles.toggleCard, fulfillmentType === 'DELIVERY' && styles.toggleCardSelected]}
-                onPress={() => setFulfillmentType('DELIVERY')}
-              >
-                <Ionicons name="bicycle" size={26} color={fulfillmentType === 'DELIVERY' ? GlassTheme.colors.accent : GlassTheme.colors.textMuted} />
-                <Text style={[styles.toggleLabel, fulfillmentType === 'DELIVERY' && styles.toggleLabelSelected]}>Delivery</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toggleCard, fulfillmentType === 'PICKUP' && styles.toggleCardSelected]}
-                onPress={() => setFulfillmentType('PICKUP')}
-              >
-                <Ionicons name="storefront-outline" size={26} color={fulfillmentType === 'PICKUP' ? GlassTheme.colors.accent : GlassTheme.colors.textMuted} />
-                <Text style={[styles.toggleLabel, fulfillmentType === 'PICKUP' && styles.toggleLabelSelected]}>Pickup</Text>
-              </TouchableOpacity>
-            </View>
 
-            {fulfillmentType === 'PICKUP' ? (
-              <GlassCard style={styles.addressCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.headerLeft}>
-                    <Ionicons name="storefront" size={20} color={GlassTheme.colors.accent} />
-                    <Text style={styles.cardTitle}>Pick up from</Text>
                   </View>
-                </View>
-                <Text style={styles.addressText}>{cartPharmacy?.pharmacyName ?? 'Your selected pharmacy'}</Text>
-                <Text style={styles.pickupHint}>No delivery fee — collect it yourself when it's ready.</Text>
-              </GlassCard>
-            ) : (
-              <GlassCard style={styles.addressCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.headerLeft}>
-                    <Ionicons name="location" size={20} color={GlassTheme.colors.accent} />
-                    <Text style={styles.cardTitle}>Delivery Address</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{cartPharmacy?.pharmacyName ?? 'Your selected pharmacy'}</Text>
+                    <Text style={styles.cardSub}>No delivery fee — collect it yourself when it&apos;s ready.</Text>
                   </View>
-                  <TouchableOpacity onPress={() => setShowLocationPicker(true)} style={styles.changeBtn}>
-                    <Text style={styles.changeBtnText}>Change</Text>
-                  </TouchableOpacity>
-                </View>
-                {detectingLocation && !deliveryAddress ? (
-                  <View style={styles.detectingRow}>
-                    <ActivityIndicator size="small" color={GlassTheme.colors.accent} />
-                    <Text style={styles.detectingText}>Detecting your location…</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.addressText}>
-                    {deliveryAddress || 'No address set — tap Change to pick one'}
-                  </Text>
-                )}
-              </GlassCard>
-            )}
-
-            <GlassCard style={styles.contactCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.headerLeft}>
-                  <Ionicons name="call" size={20} color={GlassTheme.colors.accent} />
-                  <Text style={styles.cardTitle}>Contact Number</Text>
                 </View>
               </View>
-              <GlassInput
-                placeholder={fulfillmentType === 'PICKUP' ? "Phone for pickup-ready updates" : "Phone number for delivery updates"}
-                value={phoneNumber}
-                onChangeText={(t) => { setPhoneNumber(t); if (phoneError) setPhoneError(''); }}
-                keyboardType="phone-pad"
-                icon="call"
-                error={phoneError}
-              />
-            </GlassCard>
+            ) : (
+              <TouchableOpacity style={styles.card} onPress={() => setShowLocationPicker(true)} activeOpacity={0.7}>
+                <View style={styles.cardRow}>
+                  <View style={styles.cardIcon}>
+                    <Ionicons name="location" size={18} color={GlassTheme.colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    {detectingLocation && !deliveryAddress ? (
+                      <View style={styles.detectingRow}>
+                        <ActivityIndicator size="small" color={GlassTheme.colors.primary} />
+                        <Text style={styles.cardSub}>Detecting your location…</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={styles.cardTitle} numberOfLines={2}>
+                          {deliveryAddress || 'No address set'}
+                        </Text>
+                        <Text style={styles.cardSub}>Tap to change</Text>
+                      </>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={GlassTheme.colors.textDim} />
 
-            {fulfillmentType === 'DELIVERY' && (
+                </View>
+              </TouchableOpacity>
+            )}
+            {/* ── Contact ── */}
+            <Text style={styles.sectionTitle}>Contact number</Text>
+            <GlassInput
+              placeholder={isPickup ? 'Phone for pickup-ready updates' : 'Phone number for delivery updates'}
+              value={phoneNumber}
+              onChangeText={(t) => { setPhoneNumber(t); if (phoneError) setPhoneError(''); }}
+              keyboardType="phone-pad"
+              icon="call-outline"
+              error={phoneError}
+            />
+            {/* ── Speed ── */}
+            {!isPickup && (
+
               <>
-                <Text style={styles.sectionTitle}>Choose Delivery Speed</Text>
-                {deliveryOptions.map((option) => (
-                  <TouchableOpacity key={option.id} onPress={() => setSelectedSpeed(option.id)}>
-                    <GlassCard style={styles.deliveryCard}>
-                      <View style={styles.deliveryContent}>
-                        <View style={styles.deliveryLeft}>
-                          <View style={[styles.deliveryIcon, selectedSpeed === option.id && styles.deliveryIconSelected]}>
-                            <Ionicons name={option.icon as any} size={24} color={selectedSpeed === option.id ? GlassTheme.colors.accent : GlassTheme.colors.primary} />
-                          </View>
-                          <View style={styles.deliveryInfo}>
-                            <Text style={styles.deliveryName}>{option.name}</Text>
-                            <Text style={styles.deliveryTime}>{option.time}</Text>
-                            <Text style={styles.deliveryDesc}>{option.description}</Text>
-                          </View>
-                        </View>
-                        <View style={styles.deliveryRight}>
-                          <Text style={styles.deliveryPrice}>₵{option.price.toFixed(2)}</Text>
-                          <View style={[styles.radioButton, selectedSpeed === option.id && styles.radioButtonSelected]}>
-                            {selectedSpeed === option.id && <View style={styles.radioButtonInner} />}
-                          </View>
+                <Text style={styles.sectionTitle}>Delivery speed</Text>
+                {deliveryOptions.map((option) => {
+                  const on = selectedSpeed === option.id;
+                  return (
+                    <TouchableOpacity
+                      key={option.id}
+                      onPress={() => setSelectedSpeed(option.id)}
+                      style={[styles.speedCard, on && styles.speedCardActive]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.cardIcon, on && styles.cardIconActive]}>
+                        <Ionicons name={option.icon} size={19} color={on ? '#FFFFFF' : GlassTheme.colors.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.cardTitle}>{option.name}</Text>
+                        <Text style={styles.speedTime}>{option.time}</Text>
+                        <Text style={styles.cardSub}>{option.description}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                        <Text style={styles.speedPrice}>₵{option.price.toFixed(2)}</Text>
+                        <View style={[styles.radio, on && styles.radioActive]}>
+                          {on && <View style={styles.radioDot} />}
                         </View>
                       </View>
-                    </GlassCard>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  );
+                })}
               </>
             )}
+            {/* ── Notes ── */}
+            <Text style={styles.sectionTitle}>
+              {isPickup ? 'Note for the pharmacy' : 'Delivery instructions'}
+              <Text style={styles.optional}>  optional</Text>
+            </Text>
+            <TextInput
+              placeholder={isPickup ? "e.g. I'll come after 5pm" : 'e.g. Call when you reach the gate'}
+              placeholderTextColor={GlassTheme.colors.textDim}
+              value={instructions}
+              onChangeText={setInstructions}
+              style={styles.textArea}
+              multiline
+            />
+            {/* ── Summary ── */}
+            <Text style={styles.sectionTitle}>Summary</Text>
+            <View style={styles.summaryBlock}>
 
-            <GlassCard style={styles.instructionsCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.headerLeft}>
-                  <Ionicons name="document-text" size={20} color={GlassTheme.colors.accent} />
-                  <Text style={styles.cardTitle}>{fulfillmentType === 'PICKUP' ? 'Note for the pharmacy (optional)' : 'Special Instructions (optional)'}</Text>
-                </View>
-              </View>
-              <GlassInput
-                placeholder={fulfillmentType === 'PICKUP' ? 'e.g. I\'ll come after 5pm' : 'Any special delivery instructions'}
-                value={instructions}
-                onChangeText={setInstructions}
-                multiline
-                numberOfLines={3}
-                style={styles.instructionsInput}
-              />
-            </GlassCard>
 
-            <GlassCard style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Summary</Text>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Items</Text>
                 <Text style={styles.summaryValue}>₵{subtotal.toFixed(2)}</Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>{fulfillmentType === 'PICKUP' ? 'Pickup' : 'Delivery Fee'}</Text>
+                <Text style={styles.summaryLabel}>{isPickup ? 'Pickup' : 'Delivery fee'}</Text>
                 <Text style={styles.summaryValue}>₵{deliveryFee.toFixed(2)}</Text>
               </View>
-              <View style={[styles.summaryRow, styles.totalRow]}>
+              <View style={styles.dashedDivider} />
+              <View style={styles.summaryRow}>
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>₵{total.toFixed(2)}</Text>
               </View>
-            </GlassCard>
+            </View>
           </ScrollView>
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14) + 8 }]}>
+            <TouchableOpacity style={styles.continueBtn} onPress={handleContinue} activeOpacity={0.85}>
+              <Text style={styles.continueBtnText}>Continue to payment · ₵{total.toFixed(2)}</Text>
+            </TouchableOpacity>
+          </View>
         </KeyboardAvoidingView>
+      </SheetBody>
+      <LocationPickerModal
+        visible={showLocationPicker}
+        onClose={() => setShowLocationPicker(false)}
+        onSelect={handleLocationSelect}
+        currentLocation={deliveryAddress}
+        title="Select Delivery Location"
+      />
+    </ScreenRoot>
 
-        <View style={styles.footer}>
-          <GlassButton
-            label={`Continue to Payment - ₵${total.toFixed(2)}`}
-            onPress={handleContinue}
-            size="lg"
-          />
-        </View>
 
-        <LocationPickerModal
-          visible={showLocationPicker}
-          onClose={() => setShowLocationPicker(false)}
-          onSelect={handleLocationSelect}
-          currentLocation={deliveryAddress}
-          title="Select Delivery Location"
-        />
-      </SafeAreaView>
-    </GlassBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', padding: 20, gap: 12 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 20, fontWeight: '700', color: GlassTheme.colors.text },
-  content: { padding: 20, paddingBottom: 120 },
+  tabsWrap: { paddingHorizontal: 20, paddingBottom: 4 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 28 },
+  sectionTitle: {
+    fontSize: 15, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 20, marginBottom: 10,
 
-  toggleRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  toggleCard: {
-    flex: 1, alignItems: 'center', gap: 6, paddingVertical: 18,
-    borderRadius: GlassTheme.radius.lg, backgroundColor: GlassTheme.colors.surface,
-    borderWidth: 1.5, borderColor: GlassTheme.colors.divider,
   },
-  toggleCardSelected: { borderColor: GlassTheme.colors.accent, backgroundColor: GlassTheme.colors.accentLight },
-  toggleLabel: { fontSize: 14, fontWeight: '600', color: GlassTheme.colors.textMuted },
-  toggleLabelSelected: { color: GlassTheme.colors.accentSoft },
+  optional: { fontSize: 12, fontWeight: '500', color: GlassTheme.colors.textDim },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+    padding: 14,
+  },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cardIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cardIconActive: { backgroundColor: GlassTheme.colors.primary },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text },
+  cardSub: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2, lineHeight: 17 },
 
-  addressCard: { marginBottom: 16 },
-  contactCard: { marginBottom: 24 },
-  instructionsCard: { marginBottom: 16 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: GlassTheme.colors.text },
-  changeBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: GlassTheme.colors.primaryLight, borderRadius: 12 },
-  changeBtnText: { color: GlassTheme.colors.primary, fontSize: 12, fontWeight: '600' },
-  addressText: { color: GlassTheme.colors.text, fontSize: 16, fontWeight: '500' },
   detectingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  detectingText: { color: GlassTheme.colors.textMuted, fontSize: 13 },
-  pickupHint: { color: GlassTheme.colors.textMuted, fontSize: 12, marginTop: 6 },
+  speedCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+    padding: 14, marginBottom: 10,
+  },
+  speedCardActive: { borderColor: GlassTheme.colors.primary },
+  speedTime: { fontSize: 12, fontWeight: '600', color: GlassTheme.colors.primary, marginTop: 2 },
+  speedPrice: { fontSize: 15, fontWeight: '800', color: GlassTheme.colors.text },
+  radio: {
+    width: 20, height: 20, borderRadius: 10, borderWidth: 2,
+    borderColor: GlassTheme.colors.divider,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  radioActive: { borderColor: GlassTheme.colors.primary },
+  radioDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: GlassTheme.colors.primary },
+  textArea: {
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderRadius: GlassTheme.radius.sm,
+    padding: 14, fontSize: 14,
+    color: GlassTheme.colors.text,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    minHeight: 76, textAlignVertical: 'top',
+  },
+  summaryBlock: { gap: 12 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  summaryLabel: { fontSize: 14, color: GlassTheme.colors.textMuted },
+  summaryValue: { fontSize: 14, fontWeight: '600', color: GlassTheme.colors.text },
+  dashedDivider: {
+    borderTopWidth: 1, borderStyle: 'dashed',
+    borderColor: GlassTheme.colors.divider, marginVertical: 2,
+  },
+  totalLabel: { fontSize: 15, fontWeight: '700', color: GlassTheme.colors.text },
+  totalValue: { fontSize: 17, fontWeight: '800', color: GlassTheme.colors.text },
 
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text, marginBottom: 16 },
 
-  deliveryCard: { padding: 0, marginBottom: 12 },
-  deliveryContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
-  deliveryLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  deliveryIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: GlassTheme.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  deliveryIconSelected: { backgroundColor: GlassTheme.colors.accentLight },
-  deliveryInfo: { flex: 1 },
-  deliveryName: { fontSize: 16, fontWeight: '600', color: GlassTheme.colors.text, marginBottom: 2 },
-  deliveryTime: { fontSize: 14, fontWeight: '500', color: GlassTheme.colors.accent, marginBottom: 2 },
-  deliveryDesc: { fontSize: 12, color: GlassTheme.colors.textMuted },
-  deliveryRight: { alignItems: 'flex-end', gap: 8 },
-  deliveryPrice: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text },
-  radioButton: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: GlassTheme.colors.textMuted, alignItems: 'center', justifyContent: 'center' },
-  radioButtonSelected: { borderColor: GlassTheme.colors.accent },
-  radioButtonInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: GlassTheme.colors.accent },
 
-  instructionsInput: { minHeight: 80, textAlignVertical: 'top' },
 
-  summaryCard: { marginTop: 8 },
-  summaryTitle: { fontSize: 18, fontWeight: '700', color: GlassTheme.colors.text, marginBottom: 16 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  summaryLabel: { color: GlassTheme.colors.textMuted, fontSize: 14 },
-  summaryValue: { color: GlassTheme.colors.text, fontSize: 14, fontWeight: '500' },
-  totalRow: { paddingTop: 12, borderTopWidth: 1, borderTopColor: GlassTheme.colors.divider, marginTop: 4 },
-  totalLabel: { color: GlassTheme.colors.text, fontSize: 18, fontWeight: '700' },
-  totalValue: { color: GlassTheme.colors.accent, fontSize: 20, fontWeight: '700' },
 
   footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, padding: 20, paddingBottom: 40,
-    backgroundColor: GlassTheme.colors.surface, borderTopWidth: 1, borderTopColor: GlassTheme.colors.divider,
-    ...GlassTheme.shadow.sm,
+    paddingHorizontal: 20, paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: GlassTheme.colors.divider,
+    backgroundColor: GlassTheme.colors.surface,
   },
+  continueBtn: {
+    height: 54, borderRadius: GlassTheme.radius.md,
+    backgroundColor: GlassTheme.colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  continueBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

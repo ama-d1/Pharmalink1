@@ -1,24 +1,27 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
+import { useConnectionError } from '@/hooks/useConnectionError';
 import { forgotPassword } from '@/services/authService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ForgotPasswordScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const showConnectionError = useConnectionError();
 
   const sendResetLink = async () => {
     const trimmed = email.trim();
@@ -36,8 +39,8 @@ export default function ForgotPasswordScreen() {
       await forgotPassword(trimmed);
       setSent(true);
     } catch (err: any) {
-      if (err?.message === 'NETWORK_ERROR') {
-        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
+        showConnectionError();
       } else {
         Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
       }
@@ -48,23 +51,22 @@ export default function ForgotPasswordScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
             <LinearGradient
               colors={GlassTheme.gradients.headerBg}
-              style={styles.hero}
+              style={[styles.hero, { paddingTop: insets.top + 24 }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <View style={styles.heroBubble} />
               <View style={styles.heroIcon}>
                 <Ionicons name="lock-open-outline" size={36} color="#FFFFFF" />
               </View>
               <Text style={styles.heroTitle}>Reset Password</Text>
-              <Text style={styles.heroSub}>We'll send a reset link to your email</Text>
+              <Text style={styles.heroSub}>We&apos;ll send a reset link to your email</Text>
             </LinearGradient>
 
             <GlassCard style={styles.card} glow>
@@ -75,9 +77,19 @@ export default function ForgotPasswordScreen() {
                   </View>
                   <Text style={styles.sentTitle}>Email Sent!</Text>
                   <Text style={styles.sentHint}>
-                    Check your inbox at {email} for the reset link.
+                    Check your inbox at {email} for a reset code. The email also has a
+                    link, but it won&apos;t be tappable in every mail app — copying the
+                    code works anywhere.
                   </Text>
-                  <GlassButton label="Back to Login" onPress={() => router.back()} style={{ marginTop: 8 }} />
+                  {/* The primary path, because the emailed pharmalink:// link
+                      is a custom scheme most mail clients won't linkify. */}
+                  <GlassButton
+                    label="I have a code"
+                    onPress={() => router.push('/reset-password' as any)}
+                    size="lg"
+                    style={{ marginTop: 8 }}
+                  />
+                  <GlassButton label="Back to Login" variant="ghost" onPress={() => router.back()} />
                 </View>
               ) : (
                 <>
@@ -115,11 +127,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', gap: 10,
     borderBottomLeftRadius: 32, borderBottomRightRadius: 32,
     overflow: 'hidden', position: 'relative',
-  },
-  heroBubble: {
-    position: 'absolute', top: -40, right: -30,
-    width: 130, height: 130, borderRadius: 65,
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   heroIcon: {
     width: 76, height: 76, borderRadius: 38,

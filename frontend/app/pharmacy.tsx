@@ -1,118 +1,134 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator, Alert, Linking, StatusBar,
+  StyleSheet, Text, TextInput, TouchableOpacity, View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { PharmacyMap3D } from '@/components/3d/PharmacyMap3D';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassInput } from '@/components/glass/GlassInput';
-import { GlassButton } from '@/components/glass/GlassButton';
-import { GlassTheme } from '@/constants/glassTheme';
-import { LocationPickerModal } from '@/components/ui/LocationPickerModal';
-import { 
-  getPharmacies, 
-  searchPharmacies, 
-  getNearbyPharmacies,
-  Pharmacy, 
-  PharmacySearchFilters,
-  PharmacySearchParams
-} from '@/services/pharmacyService';
-import { LocationSuggestion } from '@/services/locationService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 
+import { PharmacyMap3D, PharmacyMapHandle } from '@/components/3d/PharmacyMap3D';
+import { GlassTheme } from '@/constants/glassTheme';
+import { LocationPickerModal } from '@/components/ui/LocationPickerModal';
+import { AppBottomSheet } from '@/components/ui/BottomSheet';
+import {
+  getPharmacies,
+  searchPharmacies,
+  getNearbyPharmacies,
+  Pharmacy,
+  PharmacySearchParams,
+} from '@/services/pharmacyService';
+import { LocationSuggestion, reverseGeocode } from '@/services/locationService';
+import { useKeyboardOffset } from '@/hooks/useKeyboardOffset';
+
+const AVAILABLE_SERVICES = [
+  'Prescription',
+  'OTC Medications',
+  'Health Consultation',
+  'Vaccination',
+  'Blood Pressure Check',
+  'Health Screening',
+  'Medical Devices',
+  'Traditional Medicine',
+  'Student Health',
+];
+
+// Splits a one-line address into the two-line label the top card shows
+// ("Kwame Nkrumah University" over "Oferikrom"), matching how map apps
+// present the active location.
+function splitAddress(address: string): { title: string; subtitle: string } {
+  const parts = address.split(',').map((s) => s.trim()).filter(Boolean);
+  return {
+    title: parts[0] || address,
+    subtitle: parts.slice(1, 3).join(', '),
+  };
+}
+
+// REBUILT as a map-first screen: the map is the page, and everything else
+// floats over it (location card, locate button, search bar, results sheet).
+// The previous version buried a 260px map halfway down a long scroll of
+// filters and list cards, so the primary job of the screen — see what's
+// around me — required scrolling past everything else first.
+//
+// All data/filter behaviour is unchanged; the filters and the full list now
+// live in bottom sheets instead of inline panels.
 export default function PharmacyScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // The search bar sits in an absolutely-positioned stack pinned to the
+  // bottom, so on iOS the keyboard would cover the very field being typed
+  // into. See the hook for why this is 0 on Android.
+  const keyboardOffset = useKeyboardOffset();
+  const mapRef = useRef<PharmacyMapHandle>(null);
+
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [filteredPharmacies, setFilteredPharmacies] = useState<Pharmacy[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [currentLocation, setCurrentLocation] = useState('Accra, Ghana');
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  
+
   // Filter states
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [minRating, setMinRating] = useState<number>(0);
   const [openNow, setOpenNow] = useState(false);
   const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'name'>('distance');
-  const [showFilters, setShowFilters] = useState(false);
 
-  const availableServices = [
-    'Prescription',
-    'OTC Medications', 
-    'Health Consultation',
-    'Vaccination',
-    'Blood Pressure Check',
-    'Health Screening',
-    'Medical Devices',
-    'Traditional Medicine',
-    'Student Health'
-  ];
+  const loadPharmacies = useCallback(async () => {
+    const data = await getPharmacies();
+    setPharmacies(data);
+    setFilteredPharmacies(data);
+  }, []);
 
- useEffect(() => {
-  // FIXED: this used to be followed by a second useEffect that independently
-  // re-requested location permission and called getCurrentPositionAsync again
-  // — loadPharmaciesNearMe() below already does both of those and calls
-  // setUserLocation itself, so the second effect was pure duplicate work and
-  // could pop the location permission dialog twice in a row on some Android
-  // versions. Removed.
-  loadPharmaciesNearMe();
-}, []);
-
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      handleSearch();
-    } else {
-      setFilteredPharmacies(pharmacies);
-    }
-  }, [searchQuery, pharmacies]);
-
-  const loadPharmacies = async () => {
+  const loadPharmaciesNearMe = useCallback(async (recenter = false) => {
     setLoading(true);
     try {
-      const data = await getPharmacies();
-      setPharmacies(data);
-      setFilteredPharmacies(data);
-      if (data[0]) setSelectedId(data[0].id);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        // No permission — fall back to the general list
+        await loadPharmacies();
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = loc.coords;
+      setUserLocation({ latitude, longitude });
+      if (recenter) mapRef.current?.focus({ latitude, longitude });
+
+      // Best-effort: label the top card with where the user actually is
+      // instead of the hardcoded "Accra, Ghana" default.
+      reverseGeocode(latitude, longitude)
+        .then((name) => { if (name) setCurrentLocation(name); })
+        .catch(() => {});
+
+      const nearby = await getNearbyPharmacies(latitude, longitude, 10);
+      if (nearby.length > 0) {
+        setPharmacies(nearby);
+        setFilteredPharmacies(nearby);
+      } else {
+        // No pharmacies nearby — fall back to the general list
+        await loadPharmacies();
+      }
     } catch (error) {
-      console.error('Error loading pharmacies:', error);
+      console.error('Error loading nearby pharmacies:', error);
+      await loadPharmacies();
     } finally {
       setLoading(false);
     }
-  };
-  const loadPharmaciesNearMe = async () => {
-  setLoading(true);
-  try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      // No permission — fall back to the general list
-      await loadPharmacies();
-      return;
-    }
-    const loc = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = loc.coords;
-    setUserLocation({ latitude, longitude });
+  }, [loadPharmacies]);
 
-    const nearby = await getNearbyPharmacies(latitude, longitude, 10);
-    if (nearby.length > 0) {
-      setPharmacies(nearby);
-      setFilteredPharmacies(nearby);
-      setSelectedId(nearby[0].id);
-    } else {
-      // No pharmacies nearby — fall back to the general list
-      await loadPharmacies();
-    }
-  } catch (error) {
-    console.error('Error loading nearby pharmacies:', error);
-    await loadPharmacies();
-  } finally {
-    setLoading(false);
-  }
-};
+  // FIXED (kept from the previous version): this used to be followed by a
+  // second useEffect that independently re-requested location permission and
+  // called getCurrentPositionAsync again — loadPharmaciesNearMe already does
+  // both, so the second effect was duplicate work that could pop the
+  // permission dialog twice on some Android versions.
+  useEffect(() => { loadPharmaciesNearMe(); }, [loadPharmaciesNearMe]);
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     // Only skip the network round-trip when literally nothing is filtered —
     // any active filter (including a non-default sort or "open now") needs to
     // actually reach the backend, not just a text query or service selection.
@@ -132,68 +148,44 @@ export default function PharmacyScreen() {
           location: currentLocation,
           services: selectedServices.length > 0 ? selectedServices : undefined,
           minRating: minRating > 0 ? minRating : undefined,
-          openNow: openNow,
-          sortBy: sortBy
-        }
+          openNow,
+          sortBy,
+        },
       };
-
-      const results = await searchPharmacies(searchParams);
-      setFilteredPharmacies(results);
-      
-      if (results.length > 0 && (!selectedId || !results.find(p => p.id === selectedId))) {
-        setSelectedId(results[0].id);
-      }
+      setFilteredPharmacies(await searchPharmacies(searchParams));
     } catch (error) {
       console.error('Search error:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, selectedServices, minRating, openNow, sortBy, pharmacies, userLocation, currentLocation]);
+
+  // Debounced so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (searchQuery.trim()) handleSearch();
+      else setFilteredPharmacies(pharmacies);
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, pharmacies]);
 
   const handleLocationSelect = (location: LocationSuggestion) => {
     setCurrentLocation(location.address);
-    // Optionally trigger a new search with the new location
-    if (searchQuery.trim() || selectedServices.length > 0) {
-      handleSearch();
-    }
+    if (searchQuery.trim() || selectedServices.length > 0) handleSearch();
   };
 
-  const handleNearbyPharmacies = () => {
-    Alert.alert(
-      'Find Nearby Pharmacies',
-      'This will use your GPS location to find the nearest pharmacies.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Use GPS',
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const { status } = await Location.requestForegroundPermissionsAsync();
-              if (status !== 'granted') {
-                Alert.alert('Location permission needed', 'Enable location access in your device settings to find nearby pharmacies.');
-                return;
-              }
-              const loc = await Location.getCurrentPositionAsync({});
-              const { latitude, longitude } = loc.coords;
-              setUserLocation({ latitude, longitude });
-
-              const nearbyPharmacies = await getNearbyPharmacies(latitude, longitude, 10);
-              setFilteredPharmacies(nearbyPharmacies);
-              if (nearbyPharmacies[0]) setSelectedId(nearbyPharmacies[0].id);
-            } catch (error) {
-              Alert.alert('Error', 'Could not get nearby pharmacies');
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+  const handleRecenter = () => {
+    if (userLocation) {
+      mapRef.current?.focus(userLocation);
+      return;
+    }
+    loadPharmaciesNearMe(true);
   };
 
   const handlePharmacyPress = (pharmacy: Pharmacy) => {
     setSelectedId(pharmacy.id);
+    setShowResults(false);
     // Pins sourced from OpenStreetMap (task 63) aren't PharmaLink pharmacies
     // — no stock, no pharmacist account, nothing for pharmacy-details to
     // load. Route those to a simple directions/call sheet instead of a
@@ -202,10 +194,7 @@ export default function PharmacyScreen() {
       showUnregisteredPharmacyOptions(pharmacy);
       return;
     }
-    router.push({
-      pathname: '/pharmacy-details',
-      params: { id: pharmacy.id }
-    });
+    router.push({ pathname: '/pharmacy-details', params: { id: pharmacy.id } });
   };
 
   const showUnregisteredPharmacyOptions = (pharmacy: Pharmacy) => {
@@ -221,6 +210,8 @@ export default function PharmacyScreen() {
     if (pharmacy.phone) {
       buttons.push({ text: 'Call', onPress: () => Linking.openURL(`tel:${pharmacy.phone}`) });
     }
+    // Kept as a native Alert rather than the app's AppModal because this is a
+    // genuine three-action choice; AppModal only renders confirm/cancel.
     Alert.alert(
       pharmacy.name,
       `${pharmacy.address}\n\nThis pharmacy isn't on PharmaLink yet, so ordering through the app isn't available here — but you can get directions or call ahead.`,
@@ -229,10 +220,8 @@ export default function PharmacyScreen() {
   };
 
   const toggleService = (service: string) => {
-    setSelectedServices(prev => 
-      prev.includes(service) 
-        ? prev.filter(s => s !== service)
-        : [...prev, service]
+    setSelectedServices((prev) =>
+      prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service]
     );
   };
 
@@ -244,717 +233,505 @@ export default function PharmacyScreen() {
     setSearchQuery('');
   };
 
-  const applyFilters = () => {
-    handleSearch();
-    setShowFilters(false);
+  const mapPins = useMemo(
+    () =>
+      filteredPharmacies
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          isOpen: p.isOpen,
+          isRegistered: p.isRegistered,
+        })),
+    [filteredPharmacies]
+  );
+
+  const selected = filteredPharmacies.find((p) => p.id === selectedId);
+  const activeFilterCount =
+    selectedServices.length + (minRating > 0 ? 1 : 0) + (openNow ? 1 : 0);
+  const label = splitAddress(currentLocation);
+
+  // Tapping a pin recentres on it so the selected card never covers it.
+  const handleSelectPin = (id: string) => {
+    setSelectedId(id);
+    const p = filteredPharmacies.find((x) => x.id === id);
+    if (p?.latitude != null && p?.longitude != null) {
+      mapRef.current?.focus({ latitude: p.latitude, longitude: p.longitude });
+    }
   };
 
-  const mapPins = useMemo(
-  () =>
-    filteredPharmacies
-      .filter((p) => p.latitude != null && p.longitude != null)
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        isOpen: p.isOpen,
-      })),
-  [filteredPharmacies]
-);
-  const selected = filteredPharmacies.find((p) => p.id === selectedId);
-
   return (
-    <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Find Pharmacies</Text>
-          <TouchableOpacity onPress={handleNearbyPharmacies} style={styles.nearbyBtn}>
-            <Ionicons name="locate" size={20} color={GlassTheme.colors.accent} />
-          </TouchableOpacity>
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+
+      <PharmacyMap3D
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        pharmacies={mapPins}
+        selectedId={selectedId}
+        onSelect={handleSelectPin}
+        userLocation={userLocation}
+        showsMyLocationButton={false}
+      />
+
+      {/* ── Floating top controls ── */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.circleBtn} activeOpacity={0.8}>
+          <Ionicons name="arrow-back" size={20} color={GlassTheme.colors.text} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.locationCard}
+          onPress={() => setShowLocationPicker(true)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.locationIcon}>
+            <Ionicons name="navigate" size={16} color="#FFFFFF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.locationTitle} numberOfLines={1}>{label.title}</Text>
+            {!!label.subtitle && (
+              <Text style={styles.locationSubtitle} numberOfLines={1}>{label.subtitle}</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={GlassTheme.colors.textDim} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setShowFilters(true)}
+          style={styles.circleBtn}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="options-outline" size={20} color={GlassTheme.colors.text} />
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {loading && (
+        <View style={[styles.loadingPill, { top: insets.top + 78 }]}>
+          <ActivityIndicator size="small" color={GlassTheme.colors.primary} />
+          <Text style={styles.loadingText}>Searching…</Text>
+        </View>
+      )}
+
+      {/* ── Floating bottom stack ── */}
+      <View
+        style={[
+          styles.bottomStack,
+          { paddingBottom: Math.max(insets.bottom, 12) + 8 + keyboardOffset },
+        ]}
+      >
+        <TouchableOpacity style={styles.fab} onPress={handleRecenter} activeOpacity={0.85}>
+          <Ionicons name="navigate" size={20} color={GlassTheme.colors.primary} />
+        </TouchableOpacity>
+
+        {/* Selected pharmacy preview — appears when a pin is tapped */}
+        {selected && (
+          <View style={styles.selectedCard}>
+            <TouchableOpacity
+              style={styles.selectedRow}
+              onPress={() => handlePharmacyPress(selected)}
+              activeOpacity={0.75}
+            >
+              <View style={styles.selectedIcon}>
+                <Ionicons name="medical" size={19} color={GlassTheme.colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.selectedTitleRow}>
+                  <Text style={styles.selectedName} numberOfLines={1}>{selected.name}</Text>
+                  {selected.verified && (
+                    <Ionicons name="checkmark-circle" size={14} color={GlassTheme.colors.success} />
+                  )}
+                </View>
+                <Text style={styles.selectedAddr} numberOfLines={1}>{selected.address}</Text>
+                <View style={styles.selectedMeta}>
+                  {selected.isRegistered === false ? (
+                    <Text style={styles.notOnApp}>Not on PharmaLink</Text>
+                  ) : (
+                    <View style={styles.metaItem}>
+                      <Ionicons name="star" size={11} color={GlassTheme.colors.amber} />
+                      <Text style={styles.metaText}>{selected.rating}</Text>
+                    </View>
+                  )}
+                  {selected.distance != null && (
+                    <View style={styles.metaItem}>
+                      <Ionicons name="location-outline" size={11} color={GlassTheme.colors.textDim} />
+                      <Text style={styles.metaText}>{selected.distance}km</Text>
+                    </View>
+                  )}
+                  <View style={styles.metaItem}>
+                    <Ionicons name="time-outline" size={11} color={GlassTheme.colors.textDim} />
+                    <Text style={styles.metaText} numberOfLines={1}>{selected.openHours}</Text>
+                  </View>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={GlassTheme.colors.textDim} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dismissBtn} onPress={() => setSelectedId(undefined)} hitSlop={8}>
+              <Ionicons name="close" size={14} color={GlassTheme.colors.textDim} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Results pill — opens the full list sheet */}
+        <TouchableOpacity style={styles.resultsPill} onPress={() => setShowResults(true)} activeOpacity={0.8}>
+          <Ionicons name="list" size={15} color={GlassTheme.colors.text} />
+          <Text style={styles.resultsPillText}>
+            {filteredPharmacies.length} {filteredPharmacies.length === 1 ? 'pharmacy' : 'pharmacies'} nearby
+          </Text>
+          <Ionicons name="chevron-up" size={15} color={GlassTheme.colors.textDim} />
+        </TouchableOpacity>
+
+        {/* Search bar */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={17} color={GlassTheme.colors.textDim} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search pharmacies, services, areas"
+            placeholderTextColor={GlassTheme.colors.textDim}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            onSubmitEditing={() => handleSearch()}
+            autoCorrect={false}
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={17} color={GlassTheme.colors.textDim} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* ── Results sheet ── */}
+      <AppBottomSheet
+        visible={showResults}
+        onClose={() => setShowResults(false)}
+        title={`${filteredPharmacies.length} nearby`}
+        scrollable
+        snapPoints={['55%', '92%']}
+      >
+        {filteredPharmacies.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="search" size={32} color={GlassTheme.colors.textDim} />
+            <Text style={styles.emptyTitle}>No pharmacies found</Text>
+            <Text style={styles.emptyHint}>Try adjusting your search or filters.</Text>
+          </View>
+        ) : (
+          filteredPharmacies.map((pharmacy) => (
+            <TouchableOpacity
+              key={pharmacy.id}
+              onPress={() => handlePharmacyPress(pharmacy)}
+              style={[styles.listRow, selectedId === pharmacy.id && styles.listRowSelected]}
+              activeOpacity={0.7}
+            >
+              <View style={styles.selectedIcon}>
+                <Ionicons name="medical" size={18} color={GlassTheme.colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.selectedTitleRow}>
+                  <Text style={styles.listName} numberOfLines={1}>{pharmacy.name}</Text>
+                  {pharmacy.verified && (
+                    <Ionicons name="checkmark-circle" size={13} color={GlassTheme.colors.success} />
+                  )}
+                </View>
+                <Text style={styles.selectedAddr} numberOfLines={1}>{pharmacy.address}</Text>
+                <View style={styles.selectedMeta}>
+                  {pharmacy.isRegistered === false ? (
+                    <Text style={styles.notOnApp}>Not on PharmaLink</Text>
+                  ) : (
+                    <View style={styles.metaItem}>
+                      <Ionicons name="star" size={11} color={GlassTheme.colors.amber} />
+                      <Text style={styles.metaText}>{pharmacy.rating}</Text>
+                    </View>
+                  )}
+                  {pharmacy.distance != null && (
+                    <Text style={styles.distanceText}>{pharmacy.distance}km</Text>
+                  )}
+                  {!pharmacy.isOpen && pharmacy.isRegistered !== false && (
+                    <Text style={styles.closedBadge}>Closed</Text>
+                  )}
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={GlassTheme.colors.textDim} />
+            </TouchableOpacity>
+          ))
+        )}
+      </AppBottomSheet>
+
+      {/* ── Filters sheet ── */}
+      <AppBottomSheet
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        title="Filters"
+        scrollable
+        snapPoints={['70%', '92%']}
+      >
+        <Text style={styles.filterLabel}>Services</Text>
+        <View style={styles.chipWrap}>
+          {AVAILABLE_SERVICES.map((service) => {
+            const on = selectedServices.includes(service);
+            return (
+              <TouchableOpacity
+                key={service}
+                onPress={() => toggleService(service)}
+                style={[styles.chip, on && styles.chipActive]}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextActive]}>{service}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
-          {/* Search Section */}
-          <View style={styles.searchSection}>
-            <GlassInput
-              placeholder="Search pharmacies, services, locations..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              icon="search"
-              style={styles.searchInput}
-            />
-            
-            {/* Location and Filters */}
-            <View style={styles.controlsRow}>
-              <TouchableOpacity 
-                onPress={() => setShowLocationPicker(true)} 
-                style={styles.locationBtn}
+        <Text style={styles.filterLabel}>Minimum rating</Text>
+        <View style={styles.chipWrap}>
+          {[0, 3, 4, 4.5].map((rating) => {
+            const on = minRating === rating;
+            return (
+              <TouchableOpacity
+                key={rating}
+                onPress={() => setMinRating(rating)}
+                style={[styles.chip, on && styles.chipActive]}
+                activeOpacity={0.7}
               >
-                <Ionicons name="location" size={16} color={GlassTheme.colors.accent} />
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {currentLocation}
+                <Text style={[styles.chipText, on && styles.chipTextActive]}>
+                  {rating === 0 ? 'Any' : `${rating}+`}
                 </Text>
-                <Ionicons name="chevron-down" size={16} color={GlassTheme.colors.textMuted} />
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                onPress={() => setShowFilters(!showFilters)} 
-                style={[
-                  styles.filterBtn,
-                  (selectedServices.length > 0 || minRating > 0 || openNow) && styles.filterBtnActive
-                ]}
-              >
-                <Ionicons name="options" size={16} color={GlassTheme.colors.text} />
-                <Text style={styles.filterText}>Filters</Text>
-                {(selectedServices.length > 0 || minRating > 0 || openNow) && (
-                  <View style={styles.filterBadge}>
-                    <Text style={styles.filterBadgeText}>
-                      {selectedServices.length + (minRating > 0 ? 1 : 0) + (openNow ? 1 : 0)}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            </View>
+            );
+          })}
+        </View>
+
+        <TouchableOpacity style={styles.switchRow} onPress={() => setOpenNow(!openNow)} activeOpacity={0.7}>
+          <Text style={styles.filterLabelInline}>Open now</Text>
+          <View style={[styles.toggle, openNow && styles.toggleActive]}>
+            <View style={[styles.toggleThumb, openNow && styles.toggleThumbActive]} />
           </View>
+        </TouchableOpacity>
 
-          {/* Filters Panel */}
-          {showFilters && (
-            <GlassCard style={styles.filtersPanel}>
-              <Text style={styles.filtersTitle}>Filter Options</Text>
-              
-              {/* Services Filter */}
-              <View style={styles.filterGroup}>
-                <Text style={styles.filterLabel}>Services</Text>
-                <View style={styles.servicesGrid}>
-                  {availableServices.map(service => (
-                    <TouchableOpacity
-                      key={service}
-                      onPress={() => toggleService(service)}
-                      style={[
-                        styles.serviceChip,
-                        selectedServices.includes(service) && styles.serviceChipSelected
-                      ]}
-                    >
-                      <Text style={[
-                        styles.serviceChipText,
-                        selectedServices.includes(service) && styles.serviceChipTextSelected
-                      ]}>
-                        {service}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
+        <Text style={styles.filterLabel}>Sort by</Text>
+        <View style={styles.chipWrap}>
+          {([
+            { key: 'distance', label: 'Distance' },
+            { key: 'rating', label: 'Rating' },
+            { key: 'name', label: 'Name' },
+          ] as const).map((option) => {
+            const on = sortBy === option.key;
+            return (
+              <TouchableOpacity
+                key={option.key}
+                onPress={() => setSortBy(option.key)}
+                style={[styles.chip, on && styles.chipActive]}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextActive]}>{option.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-              {/* Rating Filter */}
-              <View style={styles.filterGroup}>
-                <Text style={styles.filterLabel}>Minimum Rating</Text>
-                <View style={styles.ratingRow}>
-                  {[0, 3, 4, 4.5].map(rating => (
-                    <TouchableOpacity
-                      key={rating}
-                      onPress={() => setMinRating(rating)}
-                      style={[
-                        styles.ratingBtn,
-                        minRating === rating && styles.ratingBtnSelected
-                      ]}
-                    >
-                      {rating === 0 ? (
-                        <Text style={styles.ratingBtnText}>Any</Text>
-                      ) : (
-                        <View style={styles.ratingBtnRow}>
-                          <Ionicons name="star" size={12} color={GlassTheme.colors.amber} />
-                          <Text style={styles.ratingBtnText}>{rating}+</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
+        <View style={styles.filterActions}>
+          <TouchableOpacity style={styles.clearBtn} onPress={clearFilters} activeOpacity={0.7}>
+            <Text style={styles.clearBtnText}>Clear all</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.applyBtn}
+            onPress={() => { setShowFilters(false); handleSearch(); }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.applyBtnText}>Apply filters</Text>
+          </TouchableOpacity>
+        </View>
+      </AppBottomSheet>
 
-              {/* Open Now Filter */}
-              <View style={styles.filterGroup}>
-                <TouchableOpacity 
-                  onPress={() => setOpenNow(!openNow)}
-                  style={styles.openNowRow}
-                >
-                  <Text style={styles.filterLabel}>Open Now</Text>
-                  <View style={[styles.toggle, openNow && styles.toggleActive]}>
-                    <View style={[styles.toggleThumb, openNow && styles.toggleThumbActive]} />
-                  </View>
-                </TouchableOpacity>
-              </View>
-
-              {/* Sort By */}
-              <View style={styles.filterGroup}>
-                <Text style={styles.filterLabel}>Sort By</Text>
-                <View style={styles.sortRow}>
-                  {[
-                    { key: 'distance', label: 'Distance' },
-                    { key: 'rating', label: 'Rating' },
-                    { key: 'name', label: 'Name' }
-                  ].map(option => (
-                    <TouchableOpacity
-                      key={option.key}
-                      onPress={() => setSortBy(option.key as any)}
-                      style={[
-                        styles.sortBtn,
-                        sortBy === option.key && styles.sortBtnSelected
-                      ]}
-                    >
-                      <Text style={styles.sortBtnText}>{option.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.filterActions}>
-                <GlassButton
-                  label="Clear All"
-                  onPress={clearFilters}
-                  variant="outline"
-                  style={styles.clearBtn}
-                />
-                <GlassButton 
-                  label="Apply Filters" 
-                  onPress={applyFilters}
-                  style={styles.applyBtn}
-                />
-              </View>
-            </GlassCard>
-          )}
-
-          {/* Results Count */}
-          <Text style={styles.resultsCount}>
-            {loading ? 'Searching...' : `${filteredPharmacies.length} pharmacies found`}
-          </Text>
-
-          {/* 3D Map */}
-         <PharmacyMap3D
-  pharmacies={mapPins}
-  selectedId={selectedId}
-  onSelect={setSelectedId}
-  userLocation={userLocation}
-/>
-
-          {/* Selected Pharmacy Info */}
-          {selected && (
-            <GlassCard gradient glow style={styles.selectedCard}>
-              <View style={styles.selectedHeader}>
-                <View style={styles.selectedInfo}>
-                  <Text style={styles.selectedName}>{selected.name}</Text>
-                  <Text style={styles.selectedAddr}>{selected.address}</Text>
-                  {selected.description && (
-                    <Text style={styles.selectedDesc}>{selected.description}</Text>
-                  )}
-                </View>
-                {selected.verified && (
-                  <View style={styles.verifiedBadge}>
-                    <Ionicons name="checkmark-circle" size={16} color={GlassTheme.colors.success} />
-                    <Text style={styles.verifiedText}>Verified</Text>
-                  </View>
-                )}
-                {selected.isRegistered === false && (
-                  <View style={styles.verifiedBadge}>
-                    <Ionicons name="information-circle" size={16} color={GlassTheme.colors.textMuted} />
-                    <Text style={[styles.verifiedText, { color: GlassTheme.colors.textMuted }]}>Not on PharmaLink</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <Ionicons name="time-outline" size={14} color={GlassTheme.colors.accent} />
-                  <Text style={styles.metaText}>{selected.openHours}</Text>
-                </View>
-                {selected.isRegistered !== false && (
-                  <View style={styles.metaItem}>
-                    <Ionicons name="star" size={14} color={GlassTheme.colors.amber} />
-                    <Text style={styles.metaText}>{selected.rating} ({selected.reviewCount})</Text>
-                  </View>
-                )}
-                {selected.distance && (
-                  <View style={styles.metaItem}>
-                    <Ionicons name="location" size={14} color={GlassTheme.colors.accent} />
-                    <Text style={styles.metaText}>{selected.distance}km</Text>
-                  </View>
-                )}
-              </View>
-
-              {selected.services.length > 0 && (
-                <View style={styles.servicesRow}>
-                  {selected.services.slice(0, 3).map(service => (
-                    <View key={service} style={styles.serviceTag}>
-                      <Text style={styles.serviceTagText}>{service}</Text>
-                    </View>
-                  ))}
-                  {selected.services.length > 3 && (
-                    <Text style={styles.moreServices}>+{selected.services.length - 3} more</Text>
-                  )}
-                </View>
-              )}
-            </GlassCard>
-          )}
-
-          {/* Pharmacy List */}
-          <Text style={styles.sectionTitle}>All Pharmacies</Text>
-          {filteredPharmacies.map((pharmacy) => (
-            <TouchableOpacity 
-              key={pharmacy.id} 
-              onPress={() => handlePharmacyPress(pharmacy)}
-              style={styles.pharmacyItem}
-            >
-              <GlassCard style={[
-                styles.pharmacyCard,
-                selectedId === pharmacy.id && styles.pharmacyCardSelected
-              ]}>
-                <View style={styles.pharmacyRow}>
-                  <View style={styles.pharmacyIcon}>
-                    <Ionicons name="medical" size={20} color={GlassTheme.colors.accent} />
-                  </View>
-                  <View style={styles.pharmacyInfo}>
-                    <View style={styles.pharmacyHeader}>
-                      <Text style={styles.pharmacyName}>{pharmacy.name}</Text>
-                      {pharmacy.verified && (
-                        <Ionicons name="checkmark-circle" size={14} color={GlassTheme.colors.success} />
-                      )}
-                      {pharmacy.isRegistered === false ? (
-                        <Text style={styles.notOnAppBadge}>Not on PharmaLink</Text>
-                      ) : !pharmacy.isOpen && (
-                        <Text style={styles.closedBadge}>Closed</Text>
-                      )}
-                    </View>
-                    <Text style={styles.pharmacyAddr}>{pharmacy.address}</Text>
-                    <View style={styles.pharmacyMeta}>
-                      {pharmacy.isRegistered !== false && (
-                        <View style={styles.ratingContainer}>
-                          <Ionicons name="star" size={12} color={GlassTheme.colors.amber} />
-                          <Text style={styles.ratingText}>{pharmacy.rating}</Text>
-                        </View>
-                      )}
-                      {pharmacy.distance && (
-                        <Text style={styles.distanceText}>{pharmacy.distance}km</Text>
-                      )}
-                      <Text style={styles.hoursText}>{pharmacy.openHours}</Text>
-                    </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={GlassTheme.colors.textDim} />
-                </View>
-              </GlassCard>
-            </TouchableOpacity>
-          ))}
-
-          {filteredPharmacies.length === 0 && !loading && (
-            <GlassCard style={styles.noResultsCard}>
-              <Ionicons name="search" size={48} color={GlassTheme.colors.textMuted} />
-              <Text style={styles.noResultsTitle}>No pharmacies found</Text>
-              <Text style={styles.noResultsText}>
-                Try adjusting your search terms or filters
-              </Text>
-            </GlassCard>
-          )}
-        </ScrollView>
-
-        {/* Location Picker Modal */}
-        <LocationPickerModal
-          visible={showLocationPicker}
-          onClose={() => setShowLocationPicker(false)}
-          onSelect={handleLocationSelect}
-          currentLocation={currentLocation}
-          title="Select Search Location"
-        />
-      </SafeAreaView>
-    </GlassBackground>
+      <LocationPickerModal
+        visible={showLocationPicker}
+        onClose={() => setShowLocationPicker(false)}
+        onSelect={handleLocationSelect}
+        currentLocation={currentLocation}
+        title="Select Search Location"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    padding: 20, 
-    gap: 12 
+  root: { flex: 1, backgroundColor: GlassTheme.colors.surfaceAlt },
+
+  // ── Top ──
+  topBar: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  circleBtn: {
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: GlassTheme.colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+    ...GlassTheme.shadow.md,
+  },
+  filterBadge: {
+    position: 'absolute', top: 4, right: 4,
+    minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8,
+    backgroundColor: GlassTheme.colors.accent,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  filterBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
+  locationCard: {
+    flex: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: GlassTheme.colors.surface,
+    borderRadius: GlassTheme.radius.md,
+    paddingHorizontal: 10, paddingVertical: 9,
+    ...GlassTheme.shadow.md,
+  },
+  locationIcon: {
+    width: 32, height: 32, borderRadius: 9,
+    backgroundColor: GlassTheme.colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  locationTitle: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
+  locationSubtitle: { fontSize: 11, color: GlassTheme.colors.textMuted, marginTop: 1 },
+
+  loadingPill: {
+    position: 'absolute', alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: GlassTheme.colors.surface,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: GlassTheme.radius.pill,
+    ...GlassTheme.shadow.md,
+  },
+  loadingText: { fontSize: 12, fontWeight: '600', color: GlassTheme.colors.textMuted },
+
+  // ── Bottom ──
+  bottomStack: {
+    position: 'absolute',
+    left: 0, right: 0, bottom: 0,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  fab: {
+    alignSelf: 'flex-end',
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: GlassTheme.colors.surface,
+    alignItems: 'center', justifyContent: 'center',
+    ...GlassTheme.shadow.lg,
+  },
+
+  selectedCard: {
+    backgroundColor: GlassTheme.colors.surface,
+    borderRadius: GlassTheme.radius.md,
+    padding: 12,
+    ...GlassTheme.shadow.lg,
+  },
+  selectedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingRight: 18 },
+  selectedIcon: {
+    width: 42, height: 42, borderRadius: 12,
     backgroundColor: GlassTheme.colors.primaryLight,
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { 
-    fontSize: 22, 
-    fontWeight: '700', 
-    color: GlassTheme.colors.text,
-    flex: 1 
+  selectedTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  selectedName: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text, flexShrink: 1 },
+  selectedAddr: { fontSize: 12, color: GlassTheme.colors.textMuted, marginTop: 2 },
+  selectedMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1 },
+  metaText: { fontSize: 11, color: GlassTheme.colors.textMuted },
+  notOnApp: {
+    fontSize: 9, fontWeight: '700', color: GlassTheme.colors.textMuted,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: GlassTheme.radius.pill,
   },
-  nearbyBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
-    alignItems: 'center', justifyContent: 'center',
+  dismissBtn: { position: 'absolute', top: 8, right: 8, padding: 4 },
+
+  resultsPill: {
+    alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: GlassTheme.colors.surface,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: GlassTheme.radius.pill,
+    ...GlassTheme.shadow.md,
   },
-  content: { padding: 20, paddingBottom: 40, gap: 14 },
-  
-  searchSection: { gap: 12 },
-  searchInput: { marginBottom: 0 },
-  controlsRow: { flexDirection: 'row', gap: 12 },
-  locationBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)' on the flat light background
-    borderRadius: 12,
+  resultsPillText: { fontSize: 12, fontWeight: '700', color: GlassTheme.colors.text },
+
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: GlassTheme.colors.surface,
+    borderRadius: GlassTheme.radius.pill,
+    paddingHorizontal: 18, height: 52,
+    ...GlassTheme.shadow.lg,
   },
-  locationText: {
-    flex: 1,
-    color: GlassTheme.colors.text,
-    fontSize: 14,
+  searchInput: { flex: 1, fontSize: 14, color: GlassTheme.colors.text, padding: 0 },
+
+  // ── Sheets ──
+  listRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md, backgroundColor: GlassTheme.colors.surface,
+    padding: 12, marginBottom: 9,
   },
-  filterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    padding: 12,
-    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
-    borderRadius: 12,
-    position: 'relative',
-  },
-  filterBtnActive: {
-    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
-    borderColor: GlassTheme.colors.accent,
-  },
-  filterText: {
-    color: GlassTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: GlassTheme.colors.accent,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
+  listRowSelected: { borderColor: GlassTheme.colors.primary },
+  listName: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text, flexShrink: 1 },
+  distanceText: { fontSize: 11, fontWeight: '600', color: GlassTheme.colors.primary },
+  closedBadge: {
+    fontSize: 9, fontWeight: '700', color: GlassTheme.colors.danger,
+    backgroundColor: GlassTheme.colors.dangerLight,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: GlassTheme.radius.pill,
   },
 
-  filtersPanel: { marginBottom: 8 },
-  filtersTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: GlassTheme.colors.text,
-    marginBottom: 16,
-  },
-  filterGroup: { marginBottom: 16 },
+  emptyCard: { alignItems: 'center', gap: 6, paddingVertical: 40 },
+  emptyTitle: { fontSize: 14, fontWeight: '700', color: GlassTheme.colors.text, marginTop: 6 },
+  emptyHint: { fontSize: 12, color: GlassTheme.colors.textDim },
+
   filterLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: GlassTheme.colors.text,
-    marginBottom: 8,
+    fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text,
+    marginTop: 18, marginBottom: 10,
   },
-  servicesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  filterLabelInline: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderRadius: GlassTheme.radius.pill,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
   },
-  serviceChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  serviceChipSelected: {
-    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
-    borderColor: GlassTheme.colors.accent,
-  },
-  serviceChipText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  serviceChipTextSelected: {
-    color: GlassTheme.colors.accent,
-  },
-  ratingRow: { flexDirection: 'row', gap: 8 },
-  ratingBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
-    borderRadius: 8,
-  },
-  ratingBtnSelected: {
-    backgroundColor: GlassTheme.colors.accent,
-  },
-  ratingBtnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingBtnText: {
-    color: GlassTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  openNowRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  chipActive: { backgroundColor: GlassTheme.colors.primary, borderColor: GlassTheme.colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: GlassTheme.colors.textMuted },
+  chipTextActive: { color: '#FFFFFF' },
+
+  switchRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 22,
   },
   toggle: {
-    width: 44,
-    height: 24,
-    // FIXED — was near-invisible 'rgba(255,255,255,0.2)' on the flat
-    // light background, so the "off" toggle track barely read as a
-    // track at all. divider is the app's real flat neutral color, giving
-    // the off-state a visible resting surface distinct from the accent
-    // used for the on-state right below.
+    width: 46, height: 26, borderRadius: 13, padding: 2,
     backgroundColor: GlassTheme.colors.divider,
-    borderRadius: 12,
-    padding: 2,
   },
-  toggleActive: {
-    backgroundColor: GlassTheme.colors.accent,
-  },
-  toggleThumb: {
-    width: 20,
-    height: 20,
-    backgroundColor: 'white',
-    borderRadius: 10,
-  },
-  toggleThumbActive: {
-    transform: [{ translateX: 20 }],
-  },
-  sortRow: { flexDirection: 'row', gap: 8 },
-  sortBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    backgroundColor: GlassTheme.colors.surfaceAlt, // FIXED — was invisible 'rgba(255,255,255,0.1)'
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  sortBtnSelected: {
-    backgroundColor: GlassTheme.colors.accent,
-  },
-  sortBtnText: {
-    color: GlassTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  // FIXED — this previously set an inline `backgroundColor:
-  // 'rgba(255,255,255,0.1)'` on a GlassButton using its default
-  // variant="primary", which paints an opaque gradient over the whole
-  // surface — so the override was fully hidden and did nothing (same
-  // dead-code pattern found and fixed in order.tsx's "Review Cart"
-  // button). Real fix is the `variant="outline"` prop added at the call
-  // site; this style now only needs the layout flex, not a fake color.
+  toggleActive: { backgroundColor: GlassTheme.colors.primary },
+  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF' },
+  toggleThumbActive: { transform: [{ translateX: 20 }] },
+
+  filterActions: { flexDirection: 'row', gap: 10, marginTop: 26 },
   clearBtn: {
-    flex: 1,
-  },
-  applyBtn: {
-    flex: 1,
-  },
-
-  resultsCount: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
-    marginVertical: 8,
-  },
-
-  selectedCard: { marginBottom: 8 },
-  selectedHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  selectedInfo: { flex: 1 },
-  selectedName: { 
-    color: GlassTheme.colors.text, 
-    fontSize: 17, 
-    fontWeight: '700' 
-  },
-  selectedAddr: { 
-    color: GlassTheme.colors.textMuted, 
-    fontSize: 13, 
-    marginTop: 4 
-  },
-  selectedDesc: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  verifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: GlassTheme.colors.successLight, // FIXED — hardcoded 'rgba(16, 185, 129, 0.1)'
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  verifiedText: {
-    color: GlassTheme.colors.success, // FIXED — hardcoded '#10B981'
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  metaRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 16,
-    marginBottom: 8,
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: { 
-    color: GlassTheme.colors.textMuted, 
-    fontSize: 12 
-  },
-  servicesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-  },
-  serviceTag: {
-    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.1)'
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  serviceTagText: {
-    color: GlassTheme.colors.accent,
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  moreServices: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 10,
-    alignSelf: 'center',
-  },
-
-  sectionTitle: { 
-    color: GlassTheme.colors.text, 
-    fontWeight: '700', 
-    fontSize: 15,
-    marginTop: 8,
-  },
-  pharmacyItem: { marginBottom: 8 },
-  pharmacyCard: { padding: 0 },
-  pharmacyCardSelected: { 
-    borderColor: GlassTheme.colors.accent 
-  },
-  pharmacyRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 12,
-    padding: 16,
-  },
-  pharmacyIcon: {
-    width: 44, height: 44, borderRadius: 14,
-    backgroundColor: GlassTheme.colors.accentLight, // FIXED — was the off-palette teal 'rgba(20,184,166,0.2)'
-    alignItems: 'center', justifyContent: 'center',
-  },
-  pharmacyInfo: { flex: 1 },
-  pharmacyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  pharmacyName: { 
-    color: GlassTheme.colors.text, 
-    fontWeight: '600', 
-    fontSize: 14,
-    flex: 1,
-  },
-  closedBadge: {
-    color: GlassTheme.colors.danger, // FIXED — hardcoded '#EF4444'
-    fontSize: 10,
-    fontWeight: '600',
-    backgroundColor: GlassTheme.colors.dangerLight, // FIXED — hardcoded 'rgba(239, 68, 68, 0.1)'
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  // Added for task 63 — flags OpenStreetMap-sourced pins (not yet a
-  // PharmaLink pharmacy) so users don't expect to be able to order there.
-  notOnAppBadge: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 9,
-    fontWeight: '600',
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 14, borderRadius: GlassTheme.radius.sm,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: GlassTheme.colors.divider,
     backgroundColor: GlassTheme.colors.surfaceAlt,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
   },
-  pharmacyAddr: { 
-    color: GlassTheme.colors.textMuted, 
-    fontSize: 12, 
-    marginBottom: 4,
+  clearBtnText: { fontSize: 13, fontWeight: '700', color: GlassTheme.colors.text },
+  applyBtn: {
+    flex: 2, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 14, borderRadius: GlassTheme.radius.sm,
+    backgroundColor: GlassTheme.colors.primary,
   },
-  pharmacyMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  ratingText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 11,
-  },
-  distanceText: {
-    color: GlassTheme.colors.accent,
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  hoursText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 11,
-  },
-
-  noResultsCard: {
-    alignItems: 'center',
-    padding: 32,
-    marginTop: 20,
-  },
-  noResultsTitle: {
-    color: GlassTheme.colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  noResultsText: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
-  },
+  applyBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
 });

@@ -38,6 +38,15 @@ export function GlassCard({
     style,
   ];
 
+  // FIXED — children used to be wrapped in an extra <View style={inner}>
+  // that carried the padding. Because the caller's `style` lands on the
+  // OUTER view, a card styled `flexDirection: 'row'` was laying out a single
+  // child (the wrapper), while the actual icon/text/chevron stacked
+  // VERTICALLY inside it. Every row-style GlassCard in the app was rendering
+  // as a column — the chat list, stock rows, payout status, and all three
+  // admin lists. Padding now lives on the card itself (see styles.card), so
+  // the caller's layout applies to the real children. Callers that opt out
+  // with `padding: 0` still win, since `style` is applied last.
   const content = (
     <View style={containerStyle}>
       {gradient && (
@@ -48,7 +57,7 @@ export function GlassCard({
           end={{ x: 1, y: 1 }}
         />
       )}
-      <View style={styles.inner}>{children}</View>
+      {children}
     </View>
   );
 
@@ -78,8 +87,13 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: GlassTheme.radius.lg,
     backgroundColor: GlassTheme.colors.surface,
-    borderWidth: 0,
-    ...GlassTheme.shadow.md,
+    // Hairline border + a much softer shadow than before — Apple-style card
+    // depth comes from a thin edge, not a heavy floating drop-shadow.
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GlassTheme.colors.divider,
+    // Moved here off the old inner wrapper (see the note above `content`).
+    padding: GlassTheme.spacing.md,
+    ...GlassTheme.shadow.sm,
     overflow: 'hidden',
   },
   elevated: {
@@ -101,9 +115,6 @@ const styles = StyleSheet.create({
   },
   gradientRadius: {
     borderRadius: GlassTheme.radius.lg,
-  },
-  inner: {
-    padding: GlassTheme.spacing.md,
   },
   glow: {
     borderColor: 'rgba(37,99,235,0.25)',

@@ -6,7 +6,6 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -154,7 +153,7 @@ export default function PayoutSettingsScreen() {
         ) : !isOwner ? (
           <View style={styles.empty}>
             <Ionicons name="lock-closed-outline" size={32} color={GlassTheme.colors.textDim} />
-            <Text style={styles.emptyText}>Only this pharmacy's owner can manage payout settings.</Text>
+            <Text style={styles.emptyText}>Only this pharmacy&apos;s owner can manage payout settings.</Text>
           </View>
         ) : !pharmacyId ? (
           <View style={styles.empty}>
@@ -162,7 +161,8 @@ export default function PayoutSettingsScreen() {
             <Text style={styles.emptyText}>Your account isn&apos;t assigned to a pharmacy yet.</Text>
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             <LinearGradient
               colors={GlassTheme.gradients.headerBg}
               style={styles.hero}
@@ -244,7 +244,7 @@ export default function PayoutSettingsScreen() {
         )}
 
         <Modal visible={bankPickerVisible} transparent animationType="slide" onRequestClose={() => setBankPickerVisible(false)}>
-          <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView style={styles.modalOverlay} behavior="padding">
             <GlassCard style={styles.modalCard}>
               <Text style={styles.pickerTitle}>Select your bank</Text>
               <GlassInput

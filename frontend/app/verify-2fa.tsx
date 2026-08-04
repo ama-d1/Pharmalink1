@@ -1,11 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View,
+  Alert, KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
@@ -20,6 +20,7 @@ import { verifyTwoFactorCode, resendTwoFactorCode } from '@/services/authService
 // route params so this one screen works for both the patient tabs and the
 // admin dashboard's separate post-login destination.
 export default function VerifyTwoFactorScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setSession } = useAuth();
   const { userId, redirectTo } = useLocalSearchParams<{ userId: string; redirectTo?: string }>();
@@ -88,14 +89,14 @@ export default function VerifyTwoFactorScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
             <View style={styles.hero}>
               <LinearGradient
                 colors={GlassTheme.gradients.headerBg}
-                style={styles.heroGrad}
+                style={[styles.heroGrad, { paddingTop: insets.top + 24 }]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >

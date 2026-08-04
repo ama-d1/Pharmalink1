@@ -1,0 +1,186 @@
+# PharmaLink — production overlay. Use WITH the base file, never alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# What this adds on top of docker-compose.yml:
+#
+#   1. JVM heap caps + container memory limits on all 14 Java services.
+#   2. restart: unless-stopped everywhere, so the stack survives a reboot.
+#   3. Caddy in front of api-gateway, terminating TLS with a real Let's
+#      Encrypt certificate.
+#   4. The gateway bound to loopback, so Caddy is the only public entrypoint.
+#
+# ── On the memory limits ───────────────────────────────────────────────────
+# Measured 2026-08-04 on the dev machine: the 15 containers were using
+# ~5.4 GB with zero tuning — pharmacy-service alone at 504 MiB, and eight
+# others over 400 MiB. That was not a real working set. A JVM with no -Xmx
+# defaults its max heap to ~25% of *host* RAM (7.6 GB there, so ~1.9 GB per
+# service) and, having been handed that budget, the collector simply doesn't
+# bother reclaiming until it approaches it. Fourteen JVMs each lazily sitting
+# on a few hundred MB of uncollected garbage is what produced 5.4 GB.
+#
+# MaxRAMPercentage makes the JVM size its heap from the *container* limit
+# instead of host RAM, which is the setting that actually matters under
+# Docker. Combined with SerialGC — a deliberate choice for heaps this small,
+# where G1's concurrent threads and region bookkeeping cost more than they
+# return — this measured **3.6 GB** for the same stack.
+#
+# Note the limits below SUM to ~6.3 GB, well above that 3.6 GB. mem_limit is
+# a cap, not a reservation, so the sum is a worst case rather than a
+# footprint — but it does mean the stack can grow past 4 GB under load. Size
+# the host for the ceiling you're willing to tolerate, not for the idle
+# reading. See docs/DEPLOY.md for why that lands on 8 GB.
+#
+# The limits below are deliberately uniform (384 MB, 512 MB for the four
+# services measured heaviest) rather than individually tuned. Uniform is
+# honest about what we know: these are idle-ish measurements from one dev
+# machine, not load-test numbers. Watch `docker stats` under real traffic and
+# raise anything that shows sustained pressure or gets OOM-killed. A service
+# restarting in a loop after deploy is the signal that its limit is too low.
+
+services:
+
+  postgres:
+    restart: unless-stopped
+    mem_limit: 512m
+    # Deliberately NOT publishing a port, not even on loopback. The base
+    # file's header makes "no published port" the actual enforcement of this
+    # stack's isolation model, and prod is the last place to weaken it.
+    #
+    # Backups don't need one — exec into the container instead, which keeps
+    # Postgres unreachable from the host network entirely:
+    #
+    #   docker compose exec -T postgres \
+    #     pg_dumpall -U postgres | gzip > backup-$(date +%F).sql.gz
+    #
+    # (An earlier revision published 127.0.0.1:5432 for convenience. Dropped
+    # it: it bought nothing pg_dumpall-over-exec doesn't already do.)
+
+  auth-service:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  user-profile-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  medication-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  pharmacy-service:
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  drug-catalog-service:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  order-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  chat-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  community-service:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  notification-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  delivery-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  admin-service:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  home-service:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  payment-service:
+    restart: unless-stopped
+    mem_limit: 448m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  api-gateway:
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -Xss512k
+
+  # ── Caddy — TLS termination and the only public entrypoint ───────────────
+  #
+  # Caddy provisions and renews a Let's Encrypt certificate automatically for
+  # whatever hostname SITE_ADDRESS is set to; there is no certbot step and no
+  # renewal cron to forget.
+  #
+  # Without a domain, set SITE_ADDRESS to <your-server-ip>.sslip.io in .env.
+  # sslip.io is a public wildcard DNS service that resolves any embedded IP
+  # back to itself (203.0.113.9.sslip.io -> 203.0.113.9), which is enough for
+  # Let's Encrypt's HTTP-01 challenge to succeed. That yields genuine HTTPS
+  # on a hostname that is stable for as long as the server's IP is — and a
+  # VPS IP is static, unlike the quick-tunnel hostname the preview build
+  # currently points at, which changes on every cloudflared restart.
+  #
+  # Caveat worth knowing: sslip.io is on the Public Suffix List, so each IP
+  # counts as its own registrable domain for Let's Encrypt rate limits, which
+  # works in your favour. But it is a free third-party service — if it is ever
+  # down when a renewal is due, renewal fails. A real domain (~$3-10/yr) is
+  # the robust version of this; swapping to one is a one-line SITE_ADDRESS
+  # change plus an A record, nothing else in this file moves.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env, e.g. 203.0.113.9.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Named volumes, not bind mounts — these hold the issued certificates
+      # and ACME account key. Losing them forces re-issuance on next start,
+      # which burns Let's Encrypt rate limit for no reason.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api-gateway
+    networks:
+      - pharmalink-net
+
+volumes:
+  caddy_data:
+  caddy_config:

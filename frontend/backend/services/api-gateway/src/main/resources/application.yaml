@@ -1,0 +1,207 @@
+spring:
+  application:
+    name: api-gateway
+
+  # Added 2026-07-24 for chat voice-note/video-clip messages (and headroom
+  # for the existing base64 pharmacy-stock-photo uploads) — WebFlux's default
+  # spring.codec.max-in-memory-size is only 256KB, which silently rejects any
+  # request body larger than that as it passes through the gateway (a
+  # DataBufferLimitException, surfaced to the client as a connection reset /
+  # 500, not a helpful "payload too large" message). A few seconds of base64
+  # audio easily exceeds 256KB, so this needed raising regardless of anything
+  # else being correct on the sending/receiving ends.
+  codec:
+    max-in-memory-size: 15MB
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # FIXED — this project uses spring-cloud-starter-gateway-server-webflux
+          # (Spring Cloud Gateway module 5.0.2 / Spring Cloud 2025.1.2), which
+          # restructured itself into separate WebFlux/WebMVC "server" modules.
+          # That restructuring also moved the config property prefix: the
+          # classic `spring.cloud.gateway.routes` (and `.httpclient`, etc.)
+          # is silently IGNORED by 5.0.2 — everything must be nested under
+          # `spring.cloud.gateway.server.webflux` instead. Confirmed against
+          # the official version-pinned docs for 5.0.2
+          # (docs.spring.io/spring-cloud-gateway/reference/spring-cloud-gateway-server-webflux/configuration.html).
+          # This is why every route 404'd with Spring's generic WebFlux
+          # "no route found" error despite the app starting up with zero
+          # errors and the YAML being syntactically valid — the old prefix
+          # just means "does not exist" to this version, so zero routes ever
+          # got registered, not just some of them.
+          #
+          # Static routes to every already-extracted service, per
+          # MICROSERVICES_PLAN.md's "static via Docker DNS" decision (#4) —
+          # hostnames below are overridable via env var for docker-compose,
+          # defaulting to localhost for local dev without Docker.
+          routes:
+            # ── auth-service — most sub-paths are deliberately NOT behind the
+            # JWT filter (register/login/forgot/reset-password/2fa-verify/
+            # 2fa-resend/health — see JwtAuthFilter's OPEN_PATH_PATTERNS for
+            # the exact list). Since coming-soon roadmap item #9 (2FA),
+            # /api/auth/2fa (GET/PATCH — the enable/disable toggle) IS behind
+            # the filter like any other protected route; the open-path list
+            # was narrowed from a blanket /api/auth/** specifically to make
+            # that possible.
+            - id: auth-service
+              uri: ${services.auth.base-url}
+              predicates:
+                - Path=/api/auth/**
+
+            - id: user-profile-service
+              uri: ${services.user-profile.base-url}
+              predicates:
+                - Path=/api/profile/**
+
+            - id: medication-service
+              uri: ${services.medication.base-url}
+              predicates:
+                - Path=/api/medications/**
+
+            - id: pharmacy-service
+              uri: ${services.pharmacy.base-url}
+              predicates:
+                - Path=/api/pharmacies/**
+
+            - id: drug-catalog-service
+              uri: ${services.drug-catalog.base-url}
+              predicates:
+                - Path=/api/drugs/**
+
+            - id: order-service
+              uri: ${services.order.base-url}
+              predicates:
+                - Path=/api/orders/**
+
+            - id: chat-service-rest
+              uri: ${services.chat.base-url}
+              predicates:
+                - Path=/api/chat/**
+
+            # Plain WebSocket (no SockJS fallback — see chat-service's
+            # WebSocketConfig), proxied via the ws:// scheme. Deliberately NOT
+            # covered by the JWT filter at the handshake — see JwtAuthFilter
+            # javadoc for why (STOMP CONNECT-frame auth is a Phase 2 item).
+            - id: chat-service-ws
+              uri: ${services.chat.ws-base-url}
+              predicates:
+                - Path=/ws/**
+
+            - id: community-service
+              uri: ${services.community.base-url}
+              predicates:
+                - Path=/api/community/**
+
+            - id: home-service
+              uri: ${services.home.base-url}
+              predicates:
+                - Path=/api/home/**
+
+            - id: delivery-service
+              uri: ${services.delivery.base-url}
+              predicates:
+                - Path=/api/delivery/**
+
+            - id: notification-service
+              uri: ${services.notification.base-url}
+              predicates:
+                - Path=/api/notifications/**
+
+            - id: admin-service
+              uri: ${services.admin.base-url}
+              predicates:
+                - Path=/api/admin/**
+
+            # payment-service (added 2026-07-23) — real Paystack integration.
+            # /api/payments/callback/** is deliberately reachable through here
+            # unauthenticated (see JwtAuthFilter's OPEN_PATH_PATTERNS below) —
+            # it's a redirect from Paystack's own domain, no JWT exists on
+            # that navigation. Everything else under /api/payments/** still
+            # requires a valid JWT like any other protected route; the
+            # ownership check itself happens inside PaymentController.
+            - id: payment-service
+              uri: ${services.payment.base-url}
+              predicates:
+                - Path=/api/payments/**
+
+            # Deliberately NOT routed here: /internal/** (e.g.
+            # user-profile-service's /internal/profiles/names,
+            # notification-service's /internal/notifications,
+            # auth-service's /internal/auth/users, pharmacy-service's
+            # /internal/pharmacies, order-service's /internal/orders,
+            # community-service's /internal/community). Those are
+            # service-to-service only — no gateway route means they're
+            # unreachable from outside, which is the intended boundary per
+            # MICROSERVICES_PLAN.md §5.2 ("services sit on a private Docker
+            # network and are not publicly exposed"). admin-service itself is
+            # the only thing that calls them.
+            #
+            # NOTE: /api/admin/** requires a valid JWT (it's not in
+            # JwtAuthFilter's open-path list) but nothing yet checks the
+            # token's ROLE — any logged-in user can reach it, not just real
+            # admins. Flagged explicitly, tracked as a Phase 2 item.
+
+          # Reactor Netty's HTTP client timeouts for calls the gateway makes to
+          # downstream services — generous defaults, not tuned/guessed against
+          # real load, just sane numbers to fail visibly instead of hanging
+          # forever. Also moved under server.webflux — see FIXED comment above.
+          httpclient:
+            connect-timeout: 5000
+            response-timeout: 15s
+
+# ── Downstream service locations ─────────────────────────────────────────────
+services:
+  auth:
+    base-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  user-profile:
+    base-url: ${USER_PROFILE_SERVICE_URL:http://localhost:8082}
+  medication:
+    base-url: ${MEDICATION_SERVICE_URL:http://localhost:8083}
+  pharmacy:
+    base-url: ${PHARMACY_SERVICE_URL:http://localhost:8084}
+  drug-catalog:
+    base-url: ${DRUG_CATALOG_SERVICE_URL:http://localhost:8085}
+  order:
+    base-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+  chat:
+    base-url: ${CHAT_SERVICE_URL:http://localhost:8087}
+    ws-base-url: ${CHAT_SERVICE_WS_URL:ws://localhost:8087}
+  community:
+    base-url: ${COMMUNITY_SERVICE_URL:http://localhost:8088}
+  home:
+    base-url: ${HOME_SERVICE_URL:http://localhost:8092}
+  delivery:
+    base-url: ${DELIVERY_SERVICE_URL:http://localhost:8090}
+  notification:
+    base-url: ${NOTIFICATION_SERVICE_URL:http://localhost:8089}
+  admin:
+    base-url: ${ADMIN_SERVICE_URL:http://localhost:8091}
+  payment:
+    base-url: ${PAYMENT_SERVICE_URL:http://localhost:8093}
+
+# ── JWT ──────────────────────────────────────────────────────────────────────
+# MUST match auth-service's security.jwt.secret exactly — this is the same
+# HMAC key auth-service signs tokens with; the gateway only verifies, never
+# issues. Same env var name (JWT_SECRET) on both services keeps this in sync
+# across environments without hardcoding the same string twice in prod.
+security:
+  jwt:
+    secret: ${JWT_SECRET:pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
+
+server:
+  port: 8080
+  address: 0.0.0.0
+
+# Neither Spring Cloud Gateway nor Netty log individual requests by default -
+# there's no "show requests" flag to flip because it was never configured at
+# all, at any log level. This makes every incoming request (and which route,
+# if any, it matched) show up in `docker compose logs -f api-gateway`, which
+# is the only way to get real proof of whether a request from outside ever
+# actually reaches this container.
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    reactor.netty.http.client: DEBUG
+    reactor.netty.http.server: DEBUG

@@ -12,7 +12,8 @@ import { getAuthHeaders } from '@/utils/authHeaders';
 // but nothing in the frontend ever called it. Wired up here, same
 // fetchWithTimeout + getAuthHeaders pattern as every other service file.
 
-const BASE_URL = API.notifications;
+// API.notifications is read at call time — see constants/api.ts on why the
+// URL must not be captured in a module-level const.
 
 export type ServerNotification = {
   id: string;
@@ -27,7 +28,7 @@ export type ServerNotification = {
 
 export async function getNotifications(userId: string): Promise<ServerNotification[]> {
   try {
-    const res = await fetchWithTimeout(`${BASE_URL}/${userId}`, {
+    const res = await fetchWithTimeout(`${API.notifications}/${userId}`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
     if (!res.ok) return [];
@@ -40,7 +41,7 @@ export async function getNotifications(userId: string): Promise<ServerNotificati
 
 export async function getUnreadNotificationCount(userId: string): Promise<number> {
   try {
-    const res = await fetchWithTimeout(`${BASE_URL}/${userId}/unread-count`, {
+    const res = await fetchWithTimeout(`${API.notifications}/${userId}/unread-count`, {
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });
     if (!res.ok) return 0;
@@ -53,7 +54,7 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
 
 export async function markNotificationRead(notificationId: string): Promise<void> {
   try {
-    await fetchWithTimeout(`${BASE_URL}/${notificationId}/read`, {
+    await fetchWithTimeout(`${API.notifications}/${notificationId}/read`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
     });

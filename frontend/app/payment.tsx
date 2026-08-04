@@ -1,18 +1,28 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, StatusBar } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassButton } from '@/components/glass/GlassButton';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
+import { useModal } from '@/context/ModalContext';
 import { createOrder } from '@/services/orderService';
 import { initializePayment, verifyPayment } from '@/services/paymentService';
 import { requestDelivery } from '@/services/deliveryService';
+import { ScreenRoot, SheetBody } from '@/components/ui/ScreenShell';
+
+// Same delivery-speed catalog delivery.tsx uses to let the user choose a
+// speed — repeated here (not imported) because that screen only hands this
+// one forward as a plain string param, not the full option object. Keeping
+// the label/icon/time lookup local avoids threading three more params
+// through the route just to redisplay what was already chosen.
+const DELIVERY_SPEED_INFO: Record<string, { label: string; time: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  standard: { label: 'Standard Delivery (Rider)', time: '2-3 hours', icon: 'bicycle' },
+  express: { label: 'Express Delivery (Rider)', time: '45-60 minutes', icon: 'car-sport' },
+  priority: { label: 'Priority Delivery (Rider)', time: '20-30 minutes', icon: 'airplane' },
+};
 
 // FIXED 2026-07-23 — the backend's Paystack callback_url is built from
 // PAYSTACK_CALLBACK_BASE_URL (payment-service's application.yaml), which
@@ -34,8 +44,13 @@ const CALLBACK_PATH_MARKER = '/api/payments/callback/';
 // own hosted checkout page in a WebView (it already lets the user pick
 // Mobile Money/Card/Bank itself — no need to duplicate that choice here),
 // then verify server-side once the WebView reports the checkout finished.
+//
+// Layout rebuilt to the ui_ref checkout screen: a white sheet over the dark
+// ink backdrop, X-close + centred title, then Order summary / Delivery
+// Details / Fees Breakdown sections and a pinned primary action.
 export default function PaymentScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   // fulfillmentType/deliveryFee/phoneNumber/instructions/deliverySpeed all
   // come from the new checkout-fulfillment step (delivery.tsx) — see that
   // file's rewritten purpose. Defaults here are a safety net in case this
@@ -44,6 +59,7 @@ export default function PaymentScreen() {
   const { address, fulfillmentType, deliveryFee: deliveryFeeParam, phoneNumber, instructions, deliverySpeed } =
     useLocalSearchParams<{ address: string; fulfillmentType?: string; deliveryFee?: string; phoneNumber?: string; instructions?: string; deliverySpeed?: string }>();
   const { user } = useAuth();
+  const { showError, showSuccess, showWarning } = useModal();
   const { getCartItems, getCartTotal, getCartPharmacy, clearCart } = useCart();
 
   const [loading, setLoading] = useState(false);
@@ -54,17 +70,19 @@ export default function PaymentScreen() {
 
   const isPickup = fulfillmentType === 'PICKUP';
   const cartItems = getCartItems();
+  const cartPharmacy = getCartPharmacy();
   const subtotal = getCartTotal();
   const deliveryFee = isPickup ? 0 : Number(deliveryFeeParam || 0);
   const total = subtotal + deliveryFee;
+  const speedInfo = deliverySpeed ? DELIVERY_SPEED_INFO[deliverySpeed] : undefined;
 
   const handlePayment = async () => {
     if (!user?.userId || !user?.email) {
-      Alert.alert('Error', 'Please log in to complete payment');
+      showError('Error', 'Please log in to complete payment');
       return;
     }
     if (cartItems.length === 0) {
-      Alert.alert('Error', 'Cart is empty');
+      showError('Error', 'Cart is empty');
       return;
     }
 
@@ -97,7 +115,7 @@ export default function PaymentScreen() {
       setCheckoutUrl(payment.authorizationUrl);
     } catch (error: any) {
       console.error('Payment initialization error:', error);
-      Alert.alert('Payment Failed', error?.message || 'Could not start payment. Please try again.');
+      showError('Payment Failed', error?.message || 'Could not start payment. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -133,17 +151,17 @@ export default function PaymentScreen() {
     try {
       const result = await verifyPayment(reference);
       if (result.status !== 'SUCCESS') {
-        Alert.alert('Payment Failed', 'Paystack reported this payment did not succeed. Please try again.');
+        showError('Payment Failed', 'Paystack reported this payment did not succeed. Please try again.');
         return;
       }
 
       clearCart();
 
       if (isPickup || !pendingOrderId) {
-        Alert.alert(
+        showSuccess(
           'Payment Successful!',
           `Your payment of ₵${total.toFixed(2)} has been confirmed. Head to the pharmacy to pick up your order once it's ready.`,
-          [{ text: 'Done', onPress: () => router.replace('/(tabs)') }]
+          { confirmLabel: 'Done', onConfirm: () => router.replace('/(tabs)') }
         );
         return;
       }
@@ -164,10 +182,13 @@ export default function PaymentScreen() {
         // Added 2026-07-23 (task 40) — routes straight into the new live
         // tracking screen instead of just going home, so "track it until it
         // arrives" is actually one tap away right when it matters most.
-        Alert.alert(
+        showSuccess(
           'Payment Successful!',
           `Your payment of ₵${total.toFixed(2)} has been confirmed and your delivery is on its way to being assigned. Tracking number: ${delivery.trackingNumber}.`,
-          [{ text: 'Track Delivery', onPress: () => router.replace({ pathname: '/delivery-tracking', params: { trackingNumber: delivery.trackingNumber } }) }]
+          {
+            confirmLabel: 'Track Delivery',
+            onConfirm: () => router.replace({ pathname: '/delivery-tracking', params: { trackingNumber: delivery.trackingNumber } }),
+          }
         );
       } catch (deliveryError: any) {
         // Was previously a hardcoded message that hid whatever actually
@@ -176,120 +197,406 @@ export default function PaymentScreen() {
         // real reason here is what lets this actually get diagnosed and
         // fixed instead of guessed at.
         console.error('Auto delivery request failed:', deliveryError);
-        Alert.alert(
+        showWarning(
           'Payment Successful — Delivery Request Failed',
           `Your payment of ₵${total.toFixed(2)} has been confirmed, but starting your delivery failed: "${deliveryError?.message || 'Unknown error'}". Please contact support with your order ID: ${pendingOrderId}.`,
-          [{ text: 'Done', onPress: () => router.replace('/(tabs)') }]
+          { confirmLabel: 'Done', onConfirm: () => router.replace('/(tabs)') }
         );
       }
     } catch (error: any) {
       console.error('Payment verification error:', error);
-      Alert.alert('Verification Failed', error?.message || 'Could not confirm your payment. Please contact support if you were charged.');
+      showError('Verification Failed', error?.message || 'Could not confirm your payment. Please contact support if you were charged.');
     } finally {
       setVerifying(false);
       setPendingOrderId(null);
     }
   };
 
+  const busy = loading || verifying;
+
   return (
-    <GlassBackground>
-      <SafeAreaView style={{ flex: 1 }}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={GlassTheme.colors.text} />
+    <ScreenRoot>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      {/* Thin strip of the dark backdrop above the sheet — this is what makes
+          the screen read as a checkout sheet presented over the app rather
+          than just another full-bleed page. */}
+      <View style={{ height: insets.top + 10 }} />
+
+      <SheetBody style={styles.sheet}>
+        <View style={styles.sheetHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn} hitSlop={8}>
+            <Ionicons name="close" size={19} color={GlassTheme.colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Payment</Text>
+          <Text style={styles.sheetTitle}>Checkout</Text>
+          <View style={styles.closeBtnPlaceholder} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
-          <GlassCard style={styles.summaryCard}>
-            <Text style={styles.sectionTitle}>Order Summary</Text>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Items ({cartItems.length})</Text>
-              <Text style={styles.summaryValue}>₵{subtotal.toFixed(2)}</Text>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {/* ── Order summary ── */}
+          <Text style={styles.sectionTitle}>Order summary</Text>
+          <View style={styles.card}>
+            {cartItems.map((item, i) => (
+              <View key={item.id} style={[styles.itemRow, i > 0 && styles.itemRowDivider]}>
+                <View style={styles.itemThumb}>
+                  <Ionicons name="medical" size={20} color={GlassTheme.colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
+                  {!!item.dosage && <Text style={styles.itemSub}>{item.dosage}</Text>}
+                  <Text style={styles.itemPrice}>₵{item.price.toFixed(2)}</Text>
+                </View>
+                <Text style={styles.itemQty}>Qty: {item.quantity}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* ── Delivery details ── */}
+          <Text style={styles.sectionTitle}>{isPickup ? 'Pickup Details' : 'Delivery Details'}</Text>
+          <View style={styles.detailCard}>
+            <View style={styles.detailTopRow}>
+              <View style={styles.detailThumb}>
+                <Ionicons name="storefront" size={18} color={GlassTheme.colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.detailName}>{cartPharmacy?.pharmacyName ?? 'Your pharmacy'}</Text>
+                <Text style={styles.detailSub} numberOfLines={2}>
+                  {address || 'No address set'}
+                </Text>
+              </View>
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>{isPickup ? 'Pickup' : 'Delivery Fee'}</Text>
-              <Text style={styles.summaryValue}>₵{deliveryFee.toFixed(2)}</Text>
+
+            <View style={styles.detailDivider} />
+
+            <View style={styles.detailBottomRow}>
+              <View style={styles.detailChip}>
+                <Ionicons
+                  name={isPickup ? 'walk' : (speedInfo?.icon ?? 'bicycle')}
+                  size={14}
+                  color={GlassTheme.colors.textMuted}
+                />
+                <Text style={styles.detailChipText}>
+                  {isPickup ? 'Self Pickup' : (speedInfo?.label ?? 'Delivery')}
+                </Text>
+              </View>
+              <View style={styles.detailChip}>
+                <Ionicons name="time-outline" size={14} color={GlassTheme.colors.textMuted} />
+                <Text style={styles.detailChipText}>
+                  {isPickup ? 'Ready soon' : (speedInfo?.time ?? 'A few hours')}
+                </Text>
+              </View>
             </View>
-            <View style={[styles.summaryRow, styles.totalRow]}>
+          </View>
+
+          {/* ── Fees breakdown ──
+              Only the two lines this app actually charges. The reference
+              shows a third "Platform Service Fee" row; there is no such fee
+              in this system, and inventing a line item on a real payment
+              screen would misstate what the user is about to be charged. */}
+          <Text style={styles.sectionTitle}>Fees Breakdown</Text>
+          <View style={styles.feesBlock}>
+            <View style={styles.feeRow}>
+              <Text style={styles.feeLabel}>Subtotal</Text>
+              <Text style={styles.feeValue}>₵{subtotal.toFixed(2)}</Text>
+            </View>
+            <View style={styles.feeRow}>
+              <Text style={styles.feeLabel}>{isPickup ? 'Pickup' : 'Delivery Fee'}</Text>
+              <Text style={styles.feeValue}>₵{deliveryFee.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.dashedDivider} />
+
+            <View style={styles.feeRow}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>₵{total.toFixed(2)}</Text>
             </View>
-          </GlassCard>
+          </View>
 
-          <GlassCard style={styles.paystackCard}>
-            <View style={styles.paystackHeader}>
-              <Ionicons name="lock-closed" size={20} color={GlassTheme.colors.primary} />
-              <Text style={styles.sectionTitle}>Secure Payment via Paystack</Text>
-            </View>
-            <Text style={styles.paystackDesc}>
-              You&apos;ll be taken to Paystack&apos;s secure checkout, where you can pay by Mobile Money,
-              card, or bank transfer. Your payment details never pass through this app.
+          <View style={styles.secureRow}>
+            <Ionicons name="lock-closed" size={13} color={GlassTheme.colors.textDim} />
+            <Text style={styles.secureText}>
+              Secured by Paystack — Mobile Money, card, or bank transfer.
             </Text>
-          </GlassCard>
+          </View>
         </ScrollView>
 
-        <View style={styles.footer}>
-          <GlassButton
-            label={verifying ? 'Confirming payment...' : `Pay ₵${total.toFixed(2)}`}
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <TouchableOpacity
             onPress={handlePayment}
-            loading={loading || verifying}
-            size="lg"
-          />
+            disabled={busy}
+            activeOpacity={0.85}
+            style={[styles.payBtn, busy && styles.payBtnDisabled]}
+          >
+            <Text style={styles.payBtnText}>
+              {verifying ? 'Confirming payment…' : loading ? 'Starting checkout…' : 'Pay Now'}
+            </Text>
+          </TouchableOpacity>
         </View>
+      </SheetBody>
 
-        <Modal visible={!!checkoutUrl} animationType="slide" onRequestClose={() => setCheckoutUrl(null)}>
-          <SafeAreaView style={{ flex: 1 }}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setCheckoutUrl(null)} style={styles.backBtn}>
-                <Ionicons name="close" size={22} color={GlassTheme.colors.text} />
-              </TouchableOpacity>
-              <Text style={styles.title}>Paystack Checkout</Text>
+      <Modal visible={!!checkoutUrl} animationType="slide" onRequestClose={() => setCheckoutUrl(null)}>
+        <SafeAreaView style={{ flex: 1 }}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setCheckoutUrl(null)} style={styles.closeBtn} hitSlop={8}>
+              <Ionicons name="close" size={19} color={GlassTheme.colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.sheetTitle}>Paystack Checkout</Text>
+            <View style={styles.closeBtnPlaceholder} />
+          </View>
+          {/* Fallback for when Paystack's post-payment redirect doesn't get
+              intercepted by handleShouldStartLoad for any reason (e.g. it
+              loads via a mechanism that isn't a top-level navigation, or
+              the WebView is slow to fire the event) — without this, a user
+              whose payment actually succeeded could get stuck staring at
+              Paystack's own success page with no way to proceed to
+              tracking. Manually re-triggers the exact same verification
+              path handleShouldStartLoad would have. */}
+          {verifying ? (
+            <View style={styles.verifyingBanner}>
+              <Text style={styles.verifyingBannerText}>Confirming your payment…</Text>
             </View>
-            {/* Fallback for when Paystack's post-payment redirect doesn't get
-                intercepted by handleShouldStartLoad for any reason (e.g. it
-                loads via a mechanism that isn't a top-level navigation, or
-                the WebView is slow to fire the event) — without this, a user
-                whose payment actually succeeded could get stuck staring at
-                Paystack's own success page with no way to proceed to
-                tracking. Manually re-triggers the exact same verification
-                path handleShouldStartLoad would have. */}
-            {verifying ? (
-              <View style={styles.verifyingBanner}>
-                <Text style={styles.verifyingBannerText}>Confirming your payment…</Text>
-              </View>
-            ) : (
-              pendingReference && (
-                <TouchableOpacity
-                  style={styles.manualVerifyBtn}
-                  onPress={() => pendingReference && handlePaystackCallback(pendingReference)}
-                >
-                  <Ionicons name="checkmark-circle-outline" size={16} color={GlassTheme.colors.primary} />
-                  <Text style={styles.manualVerifyText}>Already paid? Tap here to confirm</Text>
-                </TouchableOpacity>
-              )
-            )}
-            {checkoutUrl && (
-              <WebView
-                source={{ uri: checkoutUrl }}
-                onShouldStartLoadWithRequest={handleShouldStartLoad}
-                startInLoadingState
-              />
-            )}
-          </SafeAreaView>
-        </Modal>
-      </SafeAreaView>
-    </GlassBackground>
+          ) : (
+            pendingReference && (
+              <TouchableOpacity
+                style={styles.manualVerifyBtn}
+                onPress={() => pendingReference && handlePaystackCallback(pendingReference)}
+              >
+                <Ionicons name="checkmark-circle-outline" size={16} color={GlassTheme.colors.primary} />
+                <Text style={styles.manualVerifyText}>Already paid? Tap here to confirm</Text>
+              </TouchableOpacity>
+            )
+          )}
+          {checkoutUrl && (
+            <WebView
+              source={{ uri: checkoutUrl }}
+              onShouldStartLoadWithRequest={handleShouldStartLoad}
+              startInLoadingState
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+    </ScreenRoot>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
+  sheet: {
+    marginTop: 0,
+  },
+  sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+  },
+  sheetTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+  },
+  closeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeBtnPlaceholder: {
+    width: 34,
+    height: 34,
+  },
+
+  content: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+    marginTop: 18,
+    marginBottom: 10,
+  },
+
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GlassTheme.colors.divider,
+    borderRadius: GlassTheme.radius.md,
+    backgroundColor: GlassTheme.colors.surface,
+    paddingHorizontal: 14,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12,
+    paddingVertical: 14,
+  },
+  itemRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GlassTheme.colors.divider,
+  },
+  itemThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: GlassTheme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+  },
+  itemSub: {
+    fontSize: 12,
+    color: GlassTheme.colors.textMuted,
+    marginTop: 2,
+  },
+  itemPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+    marginTop: 6,
+  },
+  itemQty: {
+    fontSize: 12,
+    color: GlassTheme.colors.textMuted,
+    fontWeight: '600',
+  },
+
+  detailCard: {
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    borderRadius: GlassTheme.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: GlassTheme.colors.divider,
+    padding: 14,
+  },
+  detailTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailThumb: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: GlassTheme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+  },
+  detailSub: {
+    fontSize: 12,
+    color: GlassTheme.colors.textMuted,
+    marginTop: 2,
+    lineHeight: 17,
+  },
+  detailDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: GlassTheme.colors.divider,
+    marginVertical: 12,
+  },
+  detailBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  detailChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  detailChipText: {
+    fontSize: 12,
+    color: GlassTheme.colors.textMuted,
+    fontWeight: '600',
+  },
+
+  feesBlock: {
+    gap: 12,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  feeLabel: {
+    fontSize: 14,
+    color: GlassTheme.colors.textMuted,
+  },
+  feeValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GlassTheme.colors.text,
+  },
+  dashedDivider: {
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: GlassTheme.colors.divider,
+    marginVertical: 2,
+  },
+  totalLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: GlassTheme.colors.text,
+  },
+  totalValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: GlassTheme.colors.text,
+  },
+
+  secureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 20,
+  },
+  secureText: {
+    flex: 1,
+    fontSize: 11,
+    color: GlassTheme.colors.textDim,
+    lineHeight: 16,
+  },
+
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: GlassTheme.colors.divider,
+    backgroundColor: GlassTheme.colors.surface,
+  },
+  payBtn: {
+    height: 54,
+    borderRadius: GlassTheme.radius.md,
+    backgroundColor: GlassTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payBtnDisabled: {
+    opacity: 0.55,
+  },
+  payBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: GlassTheme.colors.divider,
   },
   verifyingBanner: {
     paddingVertical: 10,
@@ -313,95 +620,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: GlassTheme.colors.primary,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: GlassTheme.colors.divider,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: GlassTheme.colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: GlassTheme.colors.text,
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 120,
-  },
-  summaryCard: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: GlassTheme.colors.text,
-    marginBottom: 16,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  summaryLabel: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 14,
-  },
-  summaryValue: {
-    color: GlassTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  totalRow: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: GlassTheme.colors.divider,
-    marginTop: 4,
-  },
-  totalLabel: {
-    color: GlassTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  totalValue: {
-    color: GlassTheme.colors.accent,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  paystackCard: {
-    gap: 8,
-  },
-  paystackHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  paystackDesc: {
-    color: GlassTheme.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 20,
-    paddingBottom: 40,
-    backgroundColor: GlassTheme.colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: GlassTheme.colors.divider,
-    ...GlassTheme.shadow.sm,
   },
 });

@@ -1,11 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, Text, View,
+  Alert, KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
@@ -13,14 +13,25 @@ import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { resetPassword } from '@/services/authService';
 import { getPasswordError } from '@/utils/validation';
+// Reached two ways:
+//   1. The emailed deep link, pharmalink://reset-password?token=… , which
+//      arrives here as a route param.
+//   2. Manually, with the user pasting the code from the email.
+//
+// (2) exists because (1) cannot be relied on: `pharmalink://` is a custom URL
+// scheme and mail clients only auto-linkify http(s), so in Gmail/Outlook/most
+// webmail the link is unclickable plain text. This screen previously accepted
+// ONLY the route param, which meant anyone whose mail client didn't handle
+// the scheme hit a dead end with no way to finish resetting their password.
 
-// Reached via the emailed reset link: pharmalink://reset-password?token=...
-// (the backend currently emails a plain https:// link — that needs to become
-// a deep link or universal link pointing here before this screen is reachable
-// from the actual email. Once that's wired up, this screen is ready.)
 export default function ResetPasswordScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { token } = useLocalSearchParams<{ token?: string }>();
+  const { token: tokenParam } = useLocalSearchParams<{ token?: string }>();
+  // Only used when the deep link didn't supply one.
+  const [manualToken, setManualToken] = useState('');
+  const [tokenError, setTokenError] = useState('');
+  const token = (tokenParam ?? manualToken).trim();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -37,15 +48,16 @@ export default function ResetPasswordScreen() {
     } else if (password && confirm !== password) {
       nextConfirmError = 'Passwords do not match.';
     }
+    // Inline error rather than the old Alert: when the code is typed on this
+    // screen it's just another required field, so it should be validated like
+    // one instead of popping a dialog.
+    const nextTokenError = token ? '' : 'Paste the code from your reset email.';
 
     setPasswordError(nextPasswordError);
     setConfirmError(nextConfirmError);
-    if (nextPasswordError || nextConfirmError) return;
+    setTokenError(nextTokenError);
+    if (nextPasswordError || nextConfirmError || nextTokenError) return;
 
-    if (!token) {
-      Alert.alert('Invalid Link', 'This reset link is missing its token. Please request a new one.');
-      return;
-    }
 
     setLoading(true);
     try {
@@ -66,14 +78,14 @@ export default function ResetPasswordScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
             <LinearGradient
               colors={GlassTheme.gradients.headerBg}
-              style={styles.hero}
+              style={[styles.hero, { paddingTop: insets.top + 24 }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
@@ -98,6 +110,21 @@ export default function ResetPasswordScreen() {
                 <>
                   <Text style={styles.cardTitle}>Create a new password</Text>
                   <Text style={styles.cardSub}>Use 8+ characters with uppercase, lowercase, a number, and a symbol.</Text>
+                  {/* Shown only when the deep link didn't already supply the
+                      token — i.e. the user opened this screen manually after
+                      copying the code out of the email. */}
+                  {!tokenParam && (
+                    <GlassInput
+                      label="Reset code"
+                      icon="key-outline"
+                      value={manualToken}
+                      onChangeText={(t) => { setManualToken(t); if (tokenError) setTokenError(''); }}
+                      placeholder="Paste the code from your email"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      error={tokenError}
+                    />
+                  )}
                   <GlassInput
                     label="New password"
                     icon="lock-closed-outline"

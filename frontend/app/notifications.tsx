@@ -110,7 +110,7 @@ export default function NotificationsScreen() {
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Ionicons name="checkmark-done-circle-outline" size={32} color={GlassTheme.colors.textDim} />
-                <Text style={styles.emptyText}>You're all caught up — no notifications or pending reminders.</Text>
+                <Text style={styles.emptyText}>You&apos;re all caught up — no notifications or pending reminders.</Text>
               </View>
             }
             renderItem={({ item }) => (

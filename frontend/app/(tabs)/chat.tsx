@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInRight } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassTheme } from '@/constants/glassTheme';
@@ -17,6 +17,7 @@ type Pharmacist = { id: string; fullName: string; pharmacyName: string };
 
 export default function ChatScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [pharmacists, setPharmacists] = useState<Pharmacist[]>([]);
@@ -55,18 +56,20 @@ export default function ChatScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+      {/* light-content: the ink header runs edge-to-edge under the status
+          bar (no 'top' safe-area edge below), so dark icons would be
+          invisible against it. Matches every other screen's title bar. */}
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
 
         {/* ── Top Header ── */}
         <LinearGradient
           colors={GlassTheme.gradients.headerBg}
-          style={styles.header}
+          style={[styles.header, { paddingTop: insets.top + 14 }]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          <View style={styles.headerBubble} />
-          <View style={{ flex: 1, zIndex: 1 }}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.title}>Messages</Text>
             <Text style={styles.subtitle}>Chat with your pharmacist</Text>
           </View>
@@ -123,6 +126,7 @@ export default function ChatScreen() {
 
         {/* ── Conversation List ── */}
         <FlatList
+            keyboardShouldPersistTaps="handled"
           data={conversations}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -169,11 +173,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 12,
     overflow: 'hidden',
-  },
-  headerBubble: {
-    position: 'absolute', top: -30, right: -20,
-    width: 100, height: 100, borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   title: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
   subtitle: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },

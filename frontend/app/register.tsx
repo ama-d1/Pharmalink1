@@ -1,23 +1,28 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, Text,
+  KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassBackground } from '@/components/glass/GlassBackground';
 import { GlassButton } from '@/components/glass/GlassButton';
 import { GlassCard } from '@/components/glass/GlassCard';
 import { GlassInput } from '@/components/glass/GlassInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
+import { useModal } from '@/context/ModalContext';
+import { useConnectionError } from '@/hooks/useConnectionError';
 import { registerUser } from '@/services/authService';
 import { getEmailError, getPasswordError } from '@/utils/validation';
 
 export default function RegisterScreen() {
+  const insets = useSafeAreaInsets();
   const { setSession } = useAuth();
+  const { showError, showSuccess } = useModal();
+  const showConnectionError = useConnectionError();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({ fullName: '', phone: '', email: '', password: '' });
 
@@ -74,16 +79,18 @@ export default function RegisterScreen() {
           email:    data.email,
           role:     data.role,
         });
-        Alert.alert('Welcome!', 'Your account has been created.');
+        // The modal lives at the root (above the Stack), so it stays on
+        // screen across this navigation and greets the user on the home tab.
+        showSuccess('Welcome!', 'Your account has been created.');
         router.replace('/(tabs)');
       } else {
-        Alert.alert('Registration Failed', data.message || 'Something went wrong.');
+        showError('Registration Failed', data.message || 'Something went wrong.');
       }
     } catch (err: any) {
-      if (err?.message === 'NETWORK_ERROR') {
-        Alert.alert('Connection Error', 'Could not reach the server. Check your network.');
+      if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
+        showConnectionError();
       } else {
-        Alert.alert('Server Error', 'The server responded unexpectedly. Please try again shortly.');
+        showError('Server Error', 'The server responded unexpectedly. Please try again shortly.');
       }
     } finally {
       setLoading(false);
@@ -92,15 +99,15 @@ export default function RegisterScreen() {
 
   return (
     <GlassBackground>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
             {/* ── Header ── */}
             <LinearGradient
               colors={GlassTheme.gradients.headerBg}
-              style={styles.header}
+              style={[styles.header, { paddingTop: insets.top + 24 }]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >

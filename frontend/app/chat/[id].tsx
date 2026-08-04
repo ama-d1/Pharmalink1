@@ -221,10 +221,11 @@ export default function IndividualChat() {
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           <FlatList
+            keyboardShouldPersistTaps="handled"
             ref={listRef}
             data={messages}
             keyExtractor={(item) => item.id}

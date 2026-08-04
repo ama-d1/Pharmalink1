@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform,
+  ActivityIndicator, FlatList, KeyboardAvoidingView, Modal,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,6 +66,7 @@ export function CommentsModal({ visible, postId, userId, onClose, onCommentAdded
           <ActivityIndicator style={{ marginTop: 40 }} color={GlassTheme.colors.primary} />
         ) : (
           <FlatList
+            keyboardShouldPersistTaps="handled"
             data={comments}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
@@ -74,7 +75,7 @@ export function CommentsModal({ visible, postId, userId, onClose, onCommentAdded
                 <Ionicons name="chatbubble-ellipses-outline" size={28} color={GlassTheme.colors.textDim} />
                 <Text style={styles.emptyText}>
                   No comments yet. Be the first to reply — comment history will show up here once
-                  it's synced from the server.
+                  it&apos;s synced from the server.
                 </Text>
               </View>
             }
@@ -91,8 +92,8 @@ export function CommentsModal({ visible, postId, userId, onClose, onCommentAdded
             )}
           />
         )}
+        <KeyboardAvoidingView behavior="padding">
 
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
