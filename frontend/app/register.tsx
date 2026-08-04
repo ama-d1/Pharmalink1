@@ -104,6 +104,29 @@ export default function RegisterScreen() {
         return;
       }
 
+      // A token here means the server completed the registration outright
+      // without asking for a code. The server is the authority on whether
+      // verification is required, so this is accepted rather than treated as
+      // a failure.
+      //
+      // In practice this is the "backend hasn't been rebuilt yet" path: an
+      // auth-service from before the verification flow returns a token plus
+      // the message "Registration successful", which the old code here fell
+      // through to the error branch below — producing a dialog titled
+      // "Registration Failed" whose body read "Registration successful".
+      // Confusing enough to be worth handling properly.
+      if (data.token) {
+        await setSession({
+          token:    data.token,
+          userId:   data.userId!,
+          fullName: data.fullName ?? `${firstNameRef.current} ${lastNameRef.current}`.trim(),
+          email:    data.email ?? emailRef.current.trim(),
+          role:     data.role ?? 'PATIENT',
+        });
+        router.replace('/(tabs)');
+        return;
+      }
+
       showError('Registration Failed', data.message || 'Something went wrong.');
     } catch (err: any) {
       if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
