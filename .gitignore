@@ -6,6 +6,11 @@
 **/mvnw
 **/mvnw.cmd
 **/.mvn/
+# Maven wrappers are required by the backend service Dockerfiles.
+!backend/services/*/mvnw
+!backend/services/*/mvnw.cmd
+!backend/services/*/.mvn/
+!backend/services/*/.mvn/**
 
 # Node
 node_modules/

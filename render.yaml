@@ -1,0 +1,397 @@
+# Render Blueprint for the complete PharmaLink microservice stack.
+# The public entrypoint remains https://pharmalink1.onrender.com.
+
+databases:
+  - name: pharmalink-auth-db
+    databaseName: pharmalink_auth
+    user: pharmalink_auth
+    plan: free
+  - name: pharmalink-profile-db
+    databaseName: pharmalink_profile
+    user: pharmalink_profile
+    plan: free
+  - name: pharmalink-medication-db
+    databaseName: pharmalink_medication
+    user: pharmalink_medication
+    plan: free
+  - name: pharmalink-pharmacy-db
+    databaseName: pharmalink_pharmacy
+    user: pharmalink_pharmacy
+    plan: free
+  - name: pharmalink-drugs-db
+    databaseName: pharmalink_drugs
+    user: pharmalink_drugs
+    plan: free
+  - name: pharmalink-orders-db
+    databaseName: pharmalink_orders
+    user: pharmalink_orders
+    plan: free
+  - name: pharmalink-chat-db
+    databaseName: pharmalink_chat
+    user: pharmalink_chat
+    plan: free
+  - name: pharmalink-community-db
+    databaseName: pharmalink_community
+    user: pharmalink_community
+    plan: free
+  - name: pharmalink-notifications-db
+    databaseName: pharmalink_notifications
+    user: pharmalink_notifications
+    plan: free
+  - name: pharmalink-delivery-db
+    databaseName: pharmalink_delivery
+    user: pharmalink_delivery
+    plan: free
+  - name: pharmalink-home-db
+    databaseName: pharmalink_home
+    user: pharmalink_home
+    plan: free
+  - name: pharmalink-payments-db
+    databaseName: pharmalink_payments
+    user: pharmalink_payments
+    plan: free
+
+services:
+  - type: web
+    name: pharmalink-auth
+    runtime: docker
+    plan: free
+    rootDir: backend/services/auth-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-auth-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-auth-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-auth-db
+          property: password
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRATION_MS
+        value: "86400000"
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: LOG_RESET_CODE
+        value: "false"
+      - key: FIRST_ADMIN_EMAIL
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_IDS
+        sync: false
+      - key: ARKESEL_API_KEY
+        sync: false
+      - key: ARKESEL_SENDER_ID
+        value: PharmaLink
+      - key: SMS_DEFAULT_COUNTRY_CODE
+        value: "233"
+
+  - type: web
+    name: pharmalink-profile
+    runtime: docker
+    plan: free
+    rootDir: backend/services/user-profile-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-profile-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-profile-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-profile-db
+          property: password
+      - key: MEDICATION_SERVICE_URL
+        value: https://pharmalink-medication.onrender.com
+      - key: NOTIFICATION_SERVICE_URL
+        value: https://pharmalink-notifications.onrender.com
+
+  - type: web
+    name: pharmalink-medication
+    runtime: docker
+    plan: free
+    rootDir: backend/services/medication-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-medication-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-medication-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-medication-db
+          property: password
+
+  - type: web
+    name: pharmalink-pharmacy
+    runtime: docker
+    plan: free
+    rootDir: backend/services/pharmacy-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-pharmacy-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-pharmacy-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-pharmacy-db
+          property: password
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+
+  - type: web
+    name: pharmalink-drugs
+    runtime: docker
+    plan: free
+    rootDir: backend/services/drug-catalog-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-drugs-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-drugs-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-drugs-db
+          property: password
+
+  - type: web
+    name: pharmalink-orders
+    runtime: docker
+    plan: free
+    rootDir: backend/services/order-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-orders-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-orders-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-orders-db
+          property: password
+      - key: DRUG_CATALOG_SERVICE_URL
+        value: https://pharmalink-drugs.onrender.com
+      - key: NOTIFICATION_SERVICE_URL
+        value: https://pharmalink-notifications.onrender.com
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+
+  - type: web
+    name: pharmalink-chat
+    runtime: docker
+    plan: free
+    rootDir: backend/services/chat-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-chat-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-chat-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-chat-db
+          property: password
+      - key: JWT_SECRET
+        sync: false
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+
+  - type: web
+    name: pharmalink-community
+    runtime: docker
+    plan: free
+    rootDir: backend/services/community-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-community-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-community-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-community-db
+          property: password
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+      - key: NOTIFICATION_SERVICE_URL
+        value: https://pharmalink-notifications.onrender.com
+
+  - type: web
+    name: pharmalink-notifications
+    runtime: docker
+    plan: free
+    rootDir: backend/services/notification-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-notifications-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-notifications-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-notifications-db
+          property: password
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+
+  - type: web
+    name: pharmalink-delivery
+    runtime: docker
+    plan: free
+    rootDir: backend/services/delivery-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-delivery-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-delivery-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-delivery-db
+          property: password
+      - key: ORDER_SERVICE_URL
+        value: https://pharmalink-orders.onrender.com
+
+  - type: web
+    name: pharmalink-admin
+    runtime: docker
+    plan: free
+    rootDir: backend/services/admin-service
+    envVars:
+      - key: AUTH_SERVICE_URL
+        value: https://pharmalink-auth.onrender.com
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+      - key: PHARMACY_SERVICE_URL
+        value: https://pharmalink-pharmacy.onrender.com
+      - key: ORDER_SERVICE_URL
+        value: https://pharmalink-orders.onrender.com
+      - key: COMMUNITY_SERVICE_URL
+        value: https://pharmalink-community.onrender.com
+
+  - type: web
+    name: pharmalink-home
+    runtime: docker
+    plan: free
+    rootDir: backend/services/home-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-home-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-home-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-home-db
+          property: password
+      - key: MEDICATION_SERVICE_URL
+        value: https://pharmalink-medication.onrender.com
+
+  - type: web
+    name: pharmalink-payments
+    runtime: docker
+    plan: free
+    rootDir: backend/services/payment-service
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: pharmalink-payments-db
+          property: host
+      - key: DB_USERNAME
+        fromDatabase:
+          name: pharmalink-payments-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: pharmalink-payments-db
+          property: password
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: PAYSTACK_CALLBACK_BASE_URL
+        value: https://pharmalink1.onrender.com
+      - key: ORDER_SERVICE_URL
+        value: https://pharmalink-orders.onrender.com
+      - key: PHARMACY_SERVICE_URL
+        value: https://pharmalink-pharmacy.onrender.com
+
+  - type: web
+    name: pharmalink1
+    runtime: docker
+    plan: free
+    rootDir: backend/services/api-gateway
+    envVars:
+      - key: JWT_SECRET
+        sync: false
+      - key: AUTH_SERVICE_URL
+        value: https://pharmalink-auth.onrender.com
+      - key: USER_PROFILE_SERVICE_URL
+        value: https://pharmalink-profile.onrender.com
+      - key: MEDICATION_SERVICE_URL
+        value: https://pharmalink-medication.onrender.com
+      - key: PHARMACY_SERVICE_URL
+        value: https://pharmalink-pharmacy.onrender.com
+      - key: DRUG_CATALOG_SERVICE_URL
+        value: https://pharmalink-drugs.onrender.com
+      - key: ORDER_SERVICE_URL
+        value: https://pharmalink-orders.onrender.com
+      - key: CHAT_SERVICE_URL
+        value: https://pharmalink-chat.onrender.com
+      - key: CHAT_SERVICE_WS_URL
+        value: wss://pharmalink-chat.onrender.com
+      - key: COMMUNITY_SERVICE_URL
+        value: https://pharmalink-community.onrender.com
+      - key: NOTIFICATION_SERVICE_URL
+        value: https://pharmalink-notifications.onrender.com
+      - key: DELIVERY_SERVICE_URL
+        value: https://pharmalink-delivery.onrender.com
+      - key: ADMIN_SERVICE_URL
+        value: https://pharmalink-admin.onrender.com
+      - key: HOME_SERVICE_URL
+        value: https://pharmalink-home.onrender.com
+      - key: PAYMENT_SERVICE_URL
+        value: https://pharmalink-payments.onrender.com
