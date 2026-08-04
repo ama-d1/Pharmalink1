@@ -96,6 +96,19 @@ services:
       # already-registered account's email, then `docker compose restart
       # auth-service` to promote it to ADMIN. Blank = no-op.
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-}
+      # Google sign-in (auth redesign, 2026-08-04). Comma-separated OAuth
+      # client IDs from Google Cloud Console — list every client the app can
+      # sign in with (Web, iOS, Android), since the ID token's `aud` claim is
+      # whichever one performed the sign-in. Blank = Google sign-in rejects
+      # every request, which is the safe default; see the application.yaml
+      # comment for why it can't fall back to "accept any audience".
+      GOOGLE_OAUTH_CLIENT_IDS: ${GOOGLE_OAUTH_CLIENT_IDS:-}
+      # Arkesel SMS — sign-up verification codes are texted first and fall
+      # back to email if this is blank or a send fails. ARKESEL_SENDER_ID must
+      # be an approved sender name in your Arkesel dashboard (max 11 chars).
+      ARKESEL_API_KEY: ${ARKESEL_API_KEY:-}
+      ARKESEL_SENDER_ID: ${ARKESEL_SENDER_ID:-PharmaLink}
+      SMS_DEFAULT_COUNTRY_CODE: ${SMS_DEFAULT_COUNTRY_CODE:-233}
     depends_on:
       postgres:
         condition: service_healthy

@@ -57,6 +57,28 @@ public class EmailService {
         mailSender.send(message);
     }
 
+    /**
+     * Sign-up verification code (auth redesign, 2026-08-04). Separate from
+     * sendTwoFactorCode() below even though both mail a number: this one is
+     * the last step of creating an account, so the copy has to make clear
+     * that nothing works until the code is entered — a 2FA-style "if you
+     * didn't try to log in, ignore this" would be actively misleading here.
+     */
+    public void sendVerificationCode(String email, String code, long validMinutes) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(email);
+        message.setSubject("Confirm your PharmaLink account");
+        message.setText(
+                "Welcome to PharmaLink!\n\n"
+                        + "Enter this code in the app to finish setting up your account:\n\n"
+                        + "    " + code + "\n\n"
+                        + "The code expires in " + validMinutes + " minutes. If it does, tap \"Resend\" on the "
+                        + "verification screen for a new one.\n\n"
+                        + "If you didn't create a PharmaLink account, you can ignore this email — "
+                        + "the account stays locked until this code is entered.");
+        mailSender.send(message);
+    }
+
     // Coming-soon roadmap item #9: email-based 2FA one-time code.
     public void sendTwoFactorCode(String email, String code) {
         SimpleMailMessage message = new SimpleMailMessage();

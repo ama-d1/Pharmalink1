@@ -1,5 +1,6 @@
 package com.pharmalink.user_profile_service.model;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
@@ -45,8 +46,27 @@ public class Profile {
     @Column(nullable = false)
     private String fullName;
 
-    @Column(nullable = false)
+    /**
+     * Nullable since 2026-08-04 (auth redesign): Google sign-in creates an
+     * account with no phone number at all, and blocking profile creation on
+     * a field the user was never asked for would make one-tap sign-in
+     * impossible. Every other route into this service still collects it.
+     */
     private String phoneNumber;
+
+    /**
+     * firstName/lastName/dateOfBirth added 2026-08-04 — the redesigned
+     * sign-up form collects them. fullName is NOT derived from these at read
+     * time and stays the field the whole app displays: ~30 screens already
+     * read it, and an account created by an older build (or by Google with
+     * no name claims) can have a fullName with nothing to split. These three
+     * are additive detail, nullable throughout for exactly that reason.
+     */
+    private String firstName;
+
+    private String lastName;
+
+    private LocalDate dateOfBirth;
 
     // Denormalized from auth-service — see class javadoc.
     @Column(nullable = false)
@@ -119,6 +139,15 @@ public class Profile {
 
     public String getPhoneNumber() { return phoneNumber; }
     public void setPhoneNumber(String phoneNumber) { this.phoneNumber = phoneNumber; }
+
+    public String getFirstName() { return firstName; }
+    public void setFirstName(String firstName) { this.firstName = firstName; }
+
+    public String getLastName() { return lastName; }
+    public void setLastName(String lastName) { this.lastName = lastName; }
+
+    public LocalDate getDateOfBirth() { return dateOfBirth; }
+    public void setDateOfBirth(LocalDate dateOfBirth) { this.dateOfBirth = dateOfBirth; }
 
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }

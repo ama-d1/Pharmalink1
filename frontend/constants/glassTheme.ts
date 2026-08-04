@@ -85,6 +85,12 @@ export const GlassTheme = {
     // The sheet's top corners — the signature shape of the reference layout.
     xl: 28,
     pill: 999,
+    // Auth redesign (2026-08-04). The new sign-in/sign-up reference uses
+    // deeply curved fields and fully-round "plump" buttons. Kept as their
+    // own tokens rather than bending sm/md/lg, which ~30 other screens
+    // already depend on at their current values.
+    field: 26,
+    button: 999,
   },
   spacing: {
     xs: 6,

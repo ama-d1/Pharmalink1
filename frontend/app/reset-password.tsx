@@ -1,18 +1,25 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text, View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassButton } from '@/components/glass/GlassButton';
-import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassInput } from '@/components/glass/GlassInput';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { PillButton } from '@/components/auth/PillButton';
+import { RoundedInput } from '@/components/auth/RoundedInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { resetPassword } from '@/services/authService';
 import { getPasswordError } from '@/utils/validation';
+
 // Reached two ways:
 //   1. The emailed deep link, pharmalink://reset-password?token=… , which
 //      arrives here as a route param.
@@ -23,9 +30,10 @@ import { getPasswordError } from '@/utils/validation';
 // webmail the link is unclickable plain text. This screen previously accepted
 // ONLY the route param, which meant anyone whose mail client didn't handle
 // the scheme hit a dead end with no way to finish resetting their password.
-
+//
+// Restyled 2026-08-04 to the redesigned auth language, along with the rest of
+// the sign-in flow it's part of. The reset logic is unchanged.
 export default function ResetPasswordScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { token: tokenParam } = useLocalSearchParams<{ token?: string }>();
   // Only used when the deep link didn't supply one.
@@ -40,7 +48,7 @@ export default function ResetPasswordScreen() {
   const [done, setDone] = useState(false);
 
   const handleReset = async () => {
-    let nextPasswordError = getPasswordError(password);
+    const nextPasswordError = getPasswordError(password);
     let nextConfirmError = '';
 
     if (!confirm) {
@@ -48,7 +56,7 @@ export default function ResetPasswordScreen() {
     } else if (password && confirm !== password) {
       nextConfirmError = 'Passwords do not match.';
     }
-    // Inline error rather than the old Alert: when the code is typed on this
+    // Inline error rather than an Alert: when the code is typed on this
     // screen it's just another required field, so it should be validated like
     // one instead of popping a dialog.
     const nextTokenError = token ? '' : 'Paste the code from your reset email.';
@@ -57,7 +65,6 @@ export default function ResetPasswordScreen() {
     setConfirmError(nextConfirmError);
     setTokenError(nextTokenError);
     if (nextPasswordError || nextConfirmError || nextTokenError) return;
-
 
     setLoading(true);
     try {
@@ -77,46 +84,60 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <GlassBackground>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.topRow}>
+              <TouchableOpacity
+                style={styles.backBtn}
+                onPress={() => router.back()}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <Ionicons name="chevron-back" size={20} color={GlassTheme.colors.text} />
+              </TouchableOpacity>
+            </View>
 
-            <LinearGradient
-              colors={GlassTheme.gradients.headerBg}
-              style={[styles.hero, { paddingTop: insets.top + 24 }]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.heroIcon}>
-                <Ionicons name="key-outline" size={36} color="#FFFFFF" />
-              </View>
-              <Text style={styles.heroTitle}>Set New Password</Text>
-              <Text style={styles.heroSub}>Choose a strong new password for your account</Text>
-            </LinearGradient>
-
-            <GlassCard style={styles.card} glow>
-              {done ? (
-                <View style={styles.sentState}>
-                  <View style={styles.sentIcon}>
-                    <Ionicons name="checkmark-circle" size={48} color={GlassTheme.colors.success} />
-                  </View>
-                  <Text style={styles.sentTitle}>Password updated!</Text>
-                  <Text style={styles.sentHint}>You can now sign in with your new password.</Text>
-                  <GlassButton label="Back to Login" onPress={() => router.replace('/login')} style={{ marginTop: 8 }} />
+            {done ? (
+              <>
+                <View style={[styles.badge, styles.badgeSuccess]}>
+                  <Ionicons name="checkmark" size={44} color={GlassTheme.colors.textInverse} />
                 </View>
-              ) : (
-                <>
-                  <Text style={styles.cardTitle}>Create a new password</Text>
-                  <Text style={styles.cardSub}>Use 8+ characters with uppercase, lowercase, a number, and a symbol.</Text>
+                <View style={styles.copy}>
+                  <Text style={styles.title}>Password updated</Text>
+                  <Text style={styles.subtitle}>You can now sign in with your new password.</Text>
+                </View>
+                <PillButton label="Back to Login" onPress={() => router.replace('/login')} />
+              </>
+            ) : (
+              <>
+                <View style={styles.badge}>
+                  <Ionicons name="key-outline" size={40} color={GlassTheme.colors.textInverse} />
+                </View>
+
+                <View style={styles.copy}>
+                  <Text style={styles.title}>Set new password</Text>
+                  <Text style={styles.subtitle}>
+                    Use 8+ characters with uppercase, lowercase, a number, and a symbol.
+                  </Text>
+                </View>
+
+                <View style={styles.fields}>
                   {/* Shown only when the deep link didn't already supply the
                       token — i.e. the user opened this screen manually after
                       copying the code out of the email. */}
                   {!tokenParam && (
-                    <GlassInput
+                    <RoundedInput
                       label="Reset code"
-                      icon="key-outline"
                       value={manualToken}
                       onChangeText={(t) => { setManualToken(t); if (tokenError) setTokenError(''); }}
                       placeholder="Paste the code from your email"
@@ -125,67 +146,94 @@ export default function ResetPasswordScreen() {
                       error={tokenError}
                     />
                   )}
-                  <GlassInput
+
+                  <RoundedInput
                     label="New password"
-                    icon="lock-closed-outline"
                     value={password}
                     onChangeText={(t) => { setPassword(t); if (passwordError) setPasswordError(''); }}
                     placeholder="Enter new password"
                     secureTextEntry
+                    autoCapitalize="none"
+                    autoComplete="new-password"
                     error={passwordError}
                   />
-                  <GlassInput
+
+                  <RoundedInput
                     label="Confirm password"
-                    icon="lock-closed-outline"
                     value={confirm}
                     onChangeText={(t) => { setConfirm(t); if (confirmError) setConfirmError(''); }}
                     placeholder="Re-enter new password"
                     secureTextEntry
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    returnKeyType="done"
                     onSubmitEditing={handleReset}
                     error={confirmError}
                   />
-                  <GlassButton label="Update Password" onPress={handleReset} loading={loading} size="lg" />
-                </>
-              )}
-            </GlassCard>
+                </View>
+
+                <PillButton label="Update Password" onPress={handleReset} loading={loading} />
+              </>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </GlassBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flexGrow: 1, paddingBottom: 40 },
-  hero: {
-    paddingTop: 60, paddingBottom: 48,
-    alignItems: 'center', gap: 10,
-    borderBottomLeftRadius: 32, borderBottomRightRadius: 32,
-    overflow: 'hidden',
+  root: {
+    flex: 1,
+    backgroundColor: GlassTheme.colors.bgDeep,
   },
-  heroIcon: {
-    width: 76, height: 76, borderRadius: 38,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 6,
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    gap: 22,
   },
-  heroTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF' },
-  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', textAlign: 'center', paddingHorizontal: 20 },
-
-  // NOTE: GlassCard renders its children inside an inner wrapper View, so a
-  // `gap` passed in via `style` (as this used to have) never actually
-  // reaches these children — it has zero effect. Spacing below is done with
-  // explicit marginBottom/marginTop instead (same approach login.tsx uses),
-  // which is what actually fixes the title/subtitle overlap.
-  card: { margin: 20, marginTop: -24 },
-  cardTitle: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.text, marginBottom: 4 },
-  cardSub: { fontSize: 13, color: GlassTheme.colors.textMuted, lineHeight: 18, marginBottom: 20 },
-
-  sentState: { alignItems: 'center', gap: 12, paddingVertical: 8 },
-  sentIcon: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: GlassTheme.colors.successLight,
-    alignItems: 'center', justifyContent: 'center',
+  topRow: {
+    flexDirection: 'row',
+    paddingTop: 8,
   },
-  sentTitle: { fontSize: 22, fontWeight: '800', color: GlassTheme.colors.text },
-  sentHint: { fontSize: 13, color: GlassTheme.colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    alignSelf: 'center',
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: GlassTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  badgeSuccess: {
+    backgroundColor: GlassTheme.colors.success,
+  },
+  copy: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    fontSize: 23,
+    fontWeight: '800',
+    color: GlassTheme.colors.text,
+  },
+  subtitle: {
+    fontSize: 13.5,
+    color: GlassTheme.colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  fields: {
+    gap: 15,
+  },
 });

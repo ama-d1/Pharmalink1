@@ -46,6 +46,12 @@ public class ProfileService {
         profile.setPhoneNumber(request.getPhoneNumber());
         profile.setRole(request.getRole());
         profile.setEmail(request.getEmail());
+        // Added 2026-08-04 (auth redesign) — all three may be null; see
+        // Profile's field javadoc for why they're additive to fullName
+        // rather than replacing it.
+        profile.setFirstName(request.getFirstName());
+        profile.setLastName(request.getLastName());
+        profile.setDateOfBirth(request.getDateOfBirth());
         return profileRepository.save(profile);
     }
 
@@ -62,6 +68,12 @@ public class ProfileService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("userId", profile.getUserId());
         result.put("fullName", profile.getFullName());
+        // Added 2026-08-04 (auth redesign). fullName above stays the field
+        // screens display; these are exposed so an edit form can round-trip
+        // what sign-up collected. Null for accounts created before this.
+        result.put("firstName", profile.getFirstName());
+        result.put("lastName", profile.getLastName());
+        result.put("dateOfBirth", profile.getDateOfBirth() != null ? profile.getDateOfBirth().toString() : null);
         result.put("phoneNumber", profile.getPhoneNumber());
         result.put("profilePictureUrl", profile.getProfilePictureUrl());
         result.put("bloodGroup", profile.getBloodGroup());

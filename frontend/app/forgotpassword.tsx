@@ -1,21 +1,31 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GlassBackground } from '@/components/glass/GlassBackground';
-import { GlassButton } from '@/components/glass/GlassButton';
-import { GlassCard } from '@/components/glass/GlassCard';
-import { GlassInput } from '@/components/glass/GlassInput';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { PillButton } from '@/components/auth/PillButton';
+import { RoundedInput } from '@/components/auth/RoundedInput';
 import { GlassTheme } from '@/constants/glassTheme';
 import { useConnectionError } from '@/hooks/useConnectionError';
 import { forgotPassword } from '@/services/authService';
+import { EMAIL_REGEX } from '@/utils/validation';
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
+// Restyled 2026-08-04 to the redesigned auth language (curved fields, pill
+// buttons, no dark hero). Reached straight from the login screen's "Forgot
+// password?" link, so leaving it on the old design would have been a visible
+// seam one tap into the new flow. The reset logic itself is unchanged.
 export default function ForgotPasswordScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -50,105 +60,156 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <GlassBackground>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.topRow}>
+              <TouchableOpacity
+                style={styles.backBtn}
+                onPress={() => router.back()}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <Ionicons name="chevron-back" size={20} color={GlassTheme.colors.text} />
+              </TouchableOpacity>
+            </View>
 
-            <LinearGradient
-              colors={GlassTheme.gradients.headerBg}
-              style={[styles.hero, { paddingTop: insets.top + 24 }]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.heroIcon}>
-                <Ionicons name="lock-open-outline" size={36} color="#FFFFFF" />
-              </View>
-              <Text style={styles.heroTitle}>Reset Password</Text>
-              <Text style={styles.heroSub}>We&apos;ll send a reset link to your email</Text>
-            </LinearGradient>
-
-            <GlassCard style={styles.card} glow>
-              {sent ? (
-                <View style={styles.sentState}>
-                  <View style={styles.sentIcon}>
-                    <Ionicons name="checkmark-circle" size={48} color={GlassTheme.colors.success} />
-                  </View>
-                  <Text style={styles.sentTitle}>Email Sent!</Text>
-                  <Text style={styles.sentHint}>
-                    Check your inbox at {email} for a reset code. The email also has a
-                    link, but it won&apos;t be tappable in every mail app — copying the
-                    code works anywhere.
-                  </Text>
-                  {/* The primary path, because the emailed pharmalink:// link
-                      is a custom scheme most mail clients won't linkify. */}
-                  <GlassButton
-                    label="I have a code"
-                    onPress={() => router.push('/reset-password' as any)}
-                    size="lg"
-                    style={{ marginTop: 8 }}
-                  />
-                  <GlassButton label="Back to Login" variant="ghost" onPress={() => router.back()} />
+            {sent ? (
+              <>
+                <View style={[styles.badge, styles.badgeSuccess]}>
+                  <Ionicons name="checkmark" size={44} color={GlassTheme.colors.textInverse} />
                 </View>
-              ) : (
-                <>
-                  <Text style={styles.cardTitle}>Forgot your password?</Text>
-                  <Text style={styles.cardSub}>No worries, it happens to the best of us.</Text>
-                  <GlassInput
-                    label="Email address"
-                    icon="mail-outline"
-                    value={email}
-                    onChangeText={(t) => { setEmail(t); if (emailError) setEmailError(''); }}
-                    placeholder="you@example.com"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    error={emailError}
-                  />
-                  <GlassButton label="Send Reset Link" onPress={sendResetLink} loading={loading} size="lg" />
-                  <TouchableOpacity style={styles.backRow} onPress={() => router.back()}>
-                    <Ionicons name="arrow-back" size={14} color={GlassTheme.colors.primary} />
-                    <Text style={styles.backText}>Back to Login</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </GlassCard>
+
+                <View style={styles.copy}>
+                  <Text style={styles.title}>Email sent</Text>
+                  <Text style={styles.subtitle}>
+                    Check your inbox at <Text style={styles.subtitleStrong}>{email}</Text> for a
+                    reset code. The email also has a link, but it won&apos;t be tappable in every
+                    mail app — copying the code works anywhere.
+                  </Text>
+                </View>
+
+                {/* The primary path, because the emailed pharmalink:// link is
+                    a custom scheme most mail clients won't linkify. */}
+                <PillButton label="I have a code" onPress={() => router.push('/reset-password' as any)} />
+                <PillButton label="Back to Login" variant="outline" onPress={() => router.back()} />
+              </>
+            ) : (
+              <>
+                <View style={styles.badge}>
+                  <Ionicons name="lock-open-outline" size={40} color={GlassTheme.colors.textInverse} />
+                </View>
+
+                <View style={styles.copy}>
+                  <Text style={styles.title}>Forgot your password?</Text>
+                  <Text style={styles.subtitle}>
+                    No worries — enter your email and we&apos;ll send you a reset code.
+                  </Text>
+                </View>
+
+                <RoundedInput
+                  label="Email"
+                  value={email}
+                  onChangeText={(t) => { setEmail(t); if (emailError) setEmailError(''); }}
+                  placeholder="you@example.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  returnKeyType="send"
+                  onSubmitEditing={sendResetLink}
+                  error={emailError}
+                />
+
+                <PillButton label="Send Reset Code" onPress={sendResetLink} loading={loading} />
+
+                <TouchableOpacity style={styles.backRow} onPress={() => router.back()} hitSlop={8}>
+                  <Ionicons name="arrow-back" size={14} color={GlassTheme.colors.primary} />
+                  <Text style={styles.backText}>Back to Login</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </GlassBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flexGrow: 1, paddingBottom: 40 },
-  hero: {
-    paddingTop: 60, paddingBottom: 48,
-    alignItems: 'center', gap: 10,
-    borderBottomLeftRadius: 32, borderBottomRightRadius: 32,
-    overflow: 'hidden', position: 'relative',
+  root: {
+    flex: 1,
+    backgroundColor: GlassTheme.colors.bgDeep,
   },
-  heroIcon: {
-    width: 76, height: 76, borderRadius: 38,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 6,
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+    gap: 22,
   },
-  heroTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF' },
-  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)' },
-
-  card: { margin: 20, marginTop: -24, gap: 16 },
-  cardTitle: { fontSize: 20, fontWeight: '800', color: GlassTheme.colors.text },
-  cardSub: { fontSize: 13, color: GlassTheme.colors.textMuted, marginTop: -8 },
-
-  backRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 4 },
-  backText: { color: GlassTheme.colors.primary, fontSize: 13, fontWeight: '600' },
-
-  sentState: { alignItems: 'center', gap: 12, paddingVertical: 8 },
-  sentIcon: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: GlassTheme.colors.successLight,
-    alignItems: 'center', justifyContent: 'center',
+  topRow: {
+    flexDirection: 'row',
+    paddingTop: 8,
   },
-  sentTitle: { fontSize: 22, fontWeight: '800', color: GlassTheme.colors.text },
-  sentHint: { fontSize: 13, color: GlassTheme.colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: GlassTheme.colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    alignSelf: 'center',
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: GlassTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  badgeSuccess: {
+    backgroundColor: GlassTheme.colors.success,
+  },
+  copy: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    fontSize: 23,
+    fontWeight: '800',
+    color: GlassTheme.colors.text,
+  },
+  subtitle: {
+    fontSize: 13.5,
+    color: GlassTheme.colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  subtitleStrong: {
+    color: GlassTheme.colors.text,
+    fontWeight: '600',
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: -8,
+  },
+  backText: {
+    color: GlassTheme.colors.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });

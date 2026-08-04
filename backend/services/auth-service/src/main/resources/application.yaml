@@ -71,6 +71,39 @@ security:
     secret: ${JWT_SECRET:pharmalink_super_secret_key_2026_change_me_in_prod_min_32_chars}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
 
+# ── SMS (Arkesel) ────────────────────────────────────────────────────────────
+# Sign-up verification codes go out by SMS first, falling back to email if
+# this is unset or a send fails — so leaving api-key blank degrades to the
+# email-only behaviour rather than breaking registration.
+#
+# sender-id must be a sender name APPROVED in your Arkesel dashboard and is
+# capped at 11 characters. An unapproved or over-long sender ID is rejected
+# per-message, not at startup, so it looks like "SMS just doesn't arrive".
+#
+# default-country-code is used only to expand a local number ("024…" →
+# "233 24…"); numbers already carrying a country code are left untouched.
+sms:
+  default-country-code: ${SMS_DEFAULT_COUNTRY_CODE:233}
+  arkesel:
+    base-url: ${ARKESEL_BASE_URL:https://sms.arkesel.com}
+    api-key: ${ARKESEL_API_KEY:}
+    sender-id: ${ARKESEL_SENDER_ID:PharmaLink}
+
+# ── Google sign-in (auth redesign, 2026-08-04) ──────────────────────────────
+# Comma-separated OAuth 2.0 client IDs from Google Cloud Console
+# (APIs & Services → Credentials). List EVERY client the app can sign in
+# with — typically three: Web, iOS, Android — because the `aud` claim in the
+# ID token is whichever client actually performed the sign-in, and
+# GoogleTokenVerifier rejects any audience not in this list.
+#
+# Left EMPTY by default, and that is deliberate: with no value, /api/auth/google
+# rejects every request and logs a warning at startup. The alternative —
+# skipping the audience check when unset — would accept a Google token minted
+# for any app on the internet as a valid PharmaLink login.
+google:
+  oauth:
+    client-ids: ${GOOGLE_OAUTH_CLIENT_IDS:}
+
 # ── user-profile-service ─────────────────────────────────────────────────────
 # register() calls this synchronously to create the profile row (see
 # ProfileClient javadoc for the reliability trade-off this implies).

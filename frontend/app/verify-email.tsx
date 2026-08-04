@@ -19,30 +19,47 @@ import { GlassTheme } from '@/constants/glassTheme';
 import { useAuth } from '@/context/AuthContext';
 import { useModal } from '@/context/ModalContext';
 import { useConnectionError } from '@/hooks/useConnectionError';
-import { resendTwoFactorCode, verifyTwoFactorCode } from '@/services/authService';
+import { VerificationChannel, resendVerificationCode, verifyEmailCode } from '@/services/authService';
 
-// Six, not four — auth-service's issueAndSendTwoFactorCode() formats the 2FA
-// code as %06d. Only the sign-up verification code is four digits.
-const CODE_LENGTH = 6;
+// Must match auth-service's issueAndSendVerificationCode(), which formats
+// the code as %04d.
+const CODE_LENGTH = 4;
 
-// Coming-soon roadmap item #9: reached from login.tsx/admin-login.tsx when
-// loginUser() returns requires2FA=true — password was correct, but a code
-// was just emailed instead of a token. userId/redirectTo are passed as
-// route params so this one screen works for both the patient tabs and the
-// admin dashboard's separate post-login destination.
-//
-// Restyled 2026-08-04 to the redesigned auth language (circular code cells,
-// pill button); the flow itself is unchanged.
-export default function VerifyTwoFactorScreen() {
+/**
+ * Sign-up verification (auth redesign, 2026-08-04). Reached from register.tsx
+ * — which no longer receives a token — and from login.tsx when an existing
+ * account turns out never to have confirmed its address.
+ *
+ * Separate screen from verify-2fa.tsx despite the near-identical layout: the
+ * two verify different things against different endpoints, and merging them
+ * would mean a mode flag threaded through every branch for no real saving.
+ */
+export default function VerifyEmailScreen() {
   const router = useRouter();
   const { setSession } = useAuth();
-  const { showError } = useModal();
+  const { showError, showSuccess } = useModal();
   const showConnectionError = useConnectionError();
-  const { userId, redirectTo } = useLocalSearchParams<{ userId: string; redirectTo?: string }>();
+  const { userId, email, redirectTo, channel: initialChannel, target: initialTarget } =
+    useLocalSearchParams<{
+      userId: string;
+      email?: string;
+      redirectTo?: string;
+      channel?: string;
+      target?: string;
+    }>();
 
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [codeError, setCodeError] = useState('');
+
+  // Where the code went. Starts from what the server reported (register/login
+  // pass it through as route params) and updates when the user switches
+  // channel — the server's resend response is deliberately generic, so this
+  // tracks what was asked for.
+  const [channel, setChannel] = useState<VerificationChannel>(
+    initialChannel === 'EMAIL' ? 'EMAIL' : 'SMS',
+  );
+  const [target, setTarget] = useState<string>(initialTarget || email || '');
 
   const codeRef = useRef('');
 
@@ -52,38 +69,35 @@ export default function VerifyTwoFactorScreen() {
     const code = (submitted ?? codeRef.current).trim();
 
     if (code.length < CODE_LENGTH) {
-      setCodeError(`Enter the ${CODE_LENGTH}-digit code from your email.`);
+      setCodeError(`Enter the ${CODE_LENGTH}-digit code we sent you.`);
       return;
     }
     if (!userId) {
-      showError('Something went wrong', 'Missing login session — please sign in again.');
-      router.replace('/login');
+      showError('Something went wrong', 'Missing sign-up session — please register again.');
+      router.replace('/register');
       return;
     }
 
     setLoading(true);
     try {
-      const data = await verifyTwoFactorCode(userId, code);
+      const data = await verifyEmailCode(userId, code);
+
       if (data.token) {
-        // Mirrors admin-login.tsx's own role check — that screen can't do
-        // it itself here since it never sees a token until this step
-        // completes, so the same gate has to be repeated on this path too.
-        if (String(redirectTo || '').startsWith('/(admin)') && data.role !== 'ADMIN') {
-          showError('Access Denied', 'This account does not have admin access.');
-          router.replace('/admin-login' as any);
-          return;
-        }
         await setSession({
-          token: data.token,
-          userId: data.userId,
-          fullName: data.fullName,
-          email: data.email,
-          role: data.role,
+          token:    data.token,
+          userId:   data.userId!,
+          fullName: data.fullName ?? '',
+          email:    data.email!,
+          role:     data.role!,
         });
+        // The modal lives at the root (above the Stack), so it stays on
+        // screen across this navigation and greets the user on the home tab.
+        showSuccess('Welcome!', 'Your account is ready.');
         router.replace((redirectTo as any) || '/(tabs)');
-      } else {
-        setCodeError(data.message || 'Invalid or expired code.');
+        return;
       }
+
+      setCodeError(data.message || 'Invalid or expired code.');
     } catch (err: any) {
       if (err?.message === 'NETWORK_ERROR' || err?.message === 'TIMEOUT') {
         showConnectionError();
@@ -95,11 +109,26 @@ export default function VerifyTwoFactorScreen() {
     }
   };
 
-  const handleResend = async () => {
+  // One handler for both "Resend" (same channel) and "Send to my email
+  // instead" (switch channel) — the only difference is which channel is asked
+  // for, so splitting them would duplicate everything else.
+  const sendCode = async (nextChannel: VerificationChannel) => {
     if (!userId || resending) return;
     setResending(true);
     try {
-      await resendTwoFactorCode(userId);
+      await resendVerificationCode(userId, nextChannel);
+      setChannel(nextChannel);
+      // The server answers generically to avoid confirming the account
+      // exists, so there's no fresh masked target to show — clear the stale
+      // one rather than claim the code went somewhere it didn't.
+      if (nextChannel !== channel) setTarget('');
+      setCodeError('');
+      showSuccess(
+        'Code sent',
+        nextChannel === 'SMS'
+          ? 'A new verification code is on its way by text message.'
+          : 'A new verification code is on its way to your inbox.',
+      );
     } finally {
       setResending(false);
     }
@@ -133,13 +162,20 @@ export default function VerifyTwoFactorScreen() {
             </View>
 
             <View style={styles.badge}>
-              <Ionicons name="shield-checkmark-outline" size={40} color={GlassTheme.colors.textInverse} />
+              <Ionicons
+                name={channel === 'SMS' ? 'chatbubble-ellipses-outline' : 'mail-open-outline'}
+                size={40}
+                color={GlassTheme.colors.textInverse}
+              />
             </View>
 
             <View style={styles.copy}>
               <Text style={styles.title}>Verification code</Text>
               <Text style={styles.subtitle}>
-                Enter the {CODE_LENGTH}-digit code we just emailed you to finish signing in
+                Enter the verification code we&apos;ve sent
+                {channel === 'SMS' ? ' by text message' : ' to your email'}
+                {target ? '\n' : ''}
+                {target ? <Text style={styles.subtitleStrong}>{target}</Text> : null}
               </Text>
             </View>
 
@@ -157,10 +193,29 @@ export default function VerifyTwoFactorScreen() {
 
             <View style={styles.resendRow}>
               <Text style={styles.resendHint}>Didn&apos;t receive the code? </Text>
-              <TouchableOpacity onPress={handleResend} disabled={resending} hitSlop={8}>
+              <TouchableOpacity onPress={() => sendCode(channel)} disabled={resending} hitSlop={8}>
                 <Text style={styles.resendLink}>{resending ? 'Sending…' : 'Resend'}</Text>
               </TouchableOpacity>
             </View>
+
+            {/* The escape hatch when the text doesn't arrive — a wrong number,
+                no signal, or a carrier dropping it. Flips back and forth so
+                neither channel is a one-way door. */}
+            <TouchableOpacity
+              style={styles.switchRow}
+              onPress={() => sendCode(channel === 'SMS' ? 'EMAIL' : 'SMS')}
+              disabled={resending}
+              hitSlop={8}
+            >
+              <Ionicons
+                name={channel === 'SMS' ? 'mail-outline' : 'chatbubble-ellipses-outline'}
+                size={15}
+                color={GlassTheme.colors.primary}
+              />
+              <Text style={styles.switchText}>
+                {channel === 'SMS' ? 'Send to my email instead' : 'Send to my phone instead'}
+              </Text>
+            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -222,7 +277,10 @@ const styles = StyleSheet.create({
     color: GlassTheme.colors.textMuted,
     textAlign: 'center',
     lineHeight: 20,
-    paddingHorizontal: 12,
+  },
+  subtitleStrong: {
+    color: GlassTheme.colors.text,
+    fontWeight: '600',
   },
   error: {
     textAlign: 'center',
@@ -243,5 +301,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: GlassTheme.colors.primary,
     fontWeight: '700',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: -14,
+  },
+  switchText: {
+    fontSize: 13,
+    color: GlassTheme.colors.primary,
+    fontWeight: '600',
   },
 });

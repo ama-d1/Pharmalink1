@@ -16,10 +16,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pharmalink.auth_service.dto.AuthResponse;
+import com.pharmalink.auth_service.dto.GoogleAuthRequest;
 import com.pharmalink.auth_service.dto.LoginRequest;
 import com.pharmalink.auth_service.dto.RegisterRequest;
 import com.pharmalink.auth_service.dto.ResetPasswordRequest;
 import com.pharmalink.auth_service.dto.TwoFactorVerifyRequest;
+import com.pharmalink.auth_service.dto.VerifyEmailRequest;
+import com.pharmalink.auth_service.model.VerificationChannel;
 import com.pharmalink.auth_service.security.AuthContext;
 import com.pharmalink.auth_service.service.AuthService;
 
@@ -54,6 +57,79 @@ public class AuthController {
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         try {
             return ResponseEntity.ok(authService.login(request));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(new AuthResponse(null, null, null, null, null, e.getMessage()));
+        }
+    }
+
+    // ── Email verification at sign-up (auth redesign, 2026-08-04) ───────────
+    // Both endpoints are part of an in-progress registration — the client has
+    // no token yet — so both are in api-gateway's JwtAuthFilter open-path
+    // list, alongside register/login and the two 2FA sub-paths.
+
+    /**
+     * POST /api/auth/verify-email
+     * Body: { "userId": "...", "code": "1234" }
+     * Completes a registration (or a login that returned
+     * requiresVerification=true) and issues the token that was withheld.
+     */
+    @PostMapping("/verify-email")
+    public ResponseEntity<AuthResponse> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        try {
+            return ResponseEntity.ok(authService.verifyEmail(request.getUserId(), request.getCode()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(new AuthResponse(null, null, null, null, null, e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/auth/resend-verification
+     * Body: { "userId": "...", "channel": "SMS" | "EMAIL" (optional) }
+     *
+     * Backs both "Resend" and "Send to my email instead" on the verification
+     * screen. Defaults to SMS, matching what register() sends first.
+     *
+     * Generic 200 regardless of whether the account exists or is already
+     * verified — same enumeration-avoidance reasoning as forgotPassword()
+     * and /2fa/resend, and for the same reason (reachable without a token).
+     * The app doesn't need the channel echoed back: it already knows which
+     * one it asked for.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<?> resendVerification(@RequestBody Map<String, String> body) {
+        String userId = body.get("userId");
+        VerificationChannel channel =
+                VerificationChannel.parseOrDefault(body.get("channel"), VerificationChannel.SMS);
+        if (userId != null && !userId.isBlank()) {
+            // No try/catch needed: a failed send is already logged and
+            // swallowed inside issueAndSendVerificationCode(), so this can
+            // only throw on something genuinely unexpected — which should
+            // surface as a 500 rather than be hidden behind the generic 200.
+            authService.resendVerificationCode(userId, channel);
+        }
+        return ResponseEntity.ok(Map.of("message", "If verification is required, a new code has been sent"));
+    }
+
+    /**
+     * POST /api/auth/google
+     * Body: { "idToken": "<Google ID token>" }
+     * Signs in with Google, creating or linking the account as needed. The
+     * token is verified against Google server-side before anything in it is
+     * trusted — see GoogleTokenVerifier.
+     */
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> googleSignIn(@Valid @RequestBody GoogleAuthRequest request) {
+        try {
+            return ResponseEntity.ok(authService.loginWithGoogle(request.getIdToken()));
+        } catch (IllegalStateException e) {
+            // Thrown when google.oauth.client-ids isn't configured, or the
+            // account is disabled. 503 for the former would be more precise,
+            // but distinguishing them here would leak which one it was.
+            log.warn("Google sign-in rejected: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(new AuthResponse(null, null, null, null, null, e.getMessage()));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()
                     .body(new AuthResponse(null, null, null, null, null, e.getMessage()));

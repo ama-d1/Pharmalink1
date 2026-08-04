@@ -52,6 +52,25 @@ export default function AdminLoginScreen() {
         return;
       }
 
+      // Auth redesign (2026-08-04): an account that never confirmed its
+      // emailed code gets no token. Only reachable here for an admin who
+      // registered through the app after that change and stopped on the
+      // verification screen — but without this branch it would fall into the
+      // "Invalid credentials" message below, which is simply wrong.
+      if (data.requiresVerification) {
+        router.push({
+          pathname: '/verify-email' as any,
+          params: {
+            userId: data.userId,
+            email: data.email,
+            channel: data.verificationChannel,
+            target: data.verificationTarget,
+            redirectTo: '/(admin)/AdminHome',
+          },
+        });
+        return;
+      }
+
       if (!data.token) {
         Alert.alert('Login Failed', data.message || 'Invalid credentials.');
         return;
@@ -64,10 +83,15 @@ export default function AdminLoginScreen() {
 
       await setSession({
         token: data.token,
-        userId: data.userId,
-        fullName: data.fullName,
-        email: data.email,
-        role: data.role,
+        // Non-null assertions: a response carrying a token always carries
+        // these too (see auth-service's AuthResponse constructor), but
+        // AuthResult marks them optional because the requires2FA /
+        // requiresVerification responses legitimately omit them. Both of
+        // those cases already returned above.
+        userId: data.userId!,
+        fullName: data.fullName ?? '',
+        email: data.email!,
+        role: data.role!,
       });
       router.replace('/(admin)/AdminHome' as any);
     } catch (err: any) {

@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,16 +42,27 @@ public class ProfileClient {
     // role/email params added during chat-service extraction (step 5b) —
     // user-profile-service denormalizes them for pharmacist search. See
     // Profile's class javadoc in user-profile-service for why.
-    public void createProfile(String userId, String fullName, String phoneNumber, String role, String email) {
+    //
+    // firstName/lastName/dateOfBirth added 2026-08-04 with the auth redesign,
+    // whose sign-up form collects them. phoneNumber became nullable at the
+    // same time: a Google sign-in creates an account with no phone at all.
+    public void createProfile(String userId, String fullName, String phoneNumber, String role, String email,
+                              String firstName, String lastName, LocalDate dateOfBirth) {
+        // HashMap, not Map.of() — Map.of() throws on a null value, and three
+        // of these are legitimately nullable now.
+        Map<String, Object> body = new HashMap<>();
+        body.put("userId", userId);
+        body.put("fullName", fullName);
+        body.put("phoneNumber", phoneNumber);
+        body.put("role", role);
+        body.put("email", email);
+        body.put("firstName", firstName);
+        body.put("lastName", lastName);
+        body.put("dateOfBirth", dateOfBirth == null ? null : dateOfBirth.toString());
+
         restClient.post()
                 .uri("/internal/profiles")
-                .body(Map.of(
-                        "userId", userId,
-                        "fullName", fullName,
-                        "phoneNumber", phoneNumber,
-                        "role", role,
-                        "email", email
-                ))
+                .body(body)
                 .retrieve()
                 .toBodilessEntity();
     }

@@ -105,6 +105,17 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
             "/api/auth/reset-password",
             "/api/auth/2fa/verify",
             "/api/auth/2fa/resend",
+            // Added 2026-08-04 (auth redesign). All three are pre-token by
+            // definition: verify-email/resend-verification complete a
+            // registration that deliberately withheld the token until the
+            // emailed code is confirmed, and /google is how a token is
+            // obtained in the first place on that path. Adding them here was
+            // required — since the blanket /api/auth/** entry was removed,
+            // any new auth endpoint is protected by default, so these would
+            // otherwise 401 for exactly the users who have no token yet.
+            "/api/auth/verify-email",
+            "/api/auth/resend-verification",
+            "/api/auth/google",
             "/ws/**",
             // Added 2026-07-23 (payment-service) — Paystack's own hosted
             // checkout redirects here after payment; that navigation carries

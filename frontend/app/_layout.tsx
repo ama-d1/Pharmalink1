@@ -51,6 +51,11 @@ export default function RootLayout() {
             <Stack.Screen name="notifications" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="admin-login" options={{ headerShown: false }} />
             <Stack.Screen name="verify-2fa" options={{ headerShown: false }} />
+            {/* Sign-up email verification (auth redesign). Needs an entry
+                here for the same reason delivery-tracking did: without one,
+                expo-router renders its default native header with the route
+                filename above the screen's own header. */}
+            <Stack.Screen name="verify-email" options={{ headerShown: false }} />
             <Stack.Screen name="server-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="(admin)" options={{ headerShown: false }} />
