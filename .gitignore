@@ -36,3 +36,4 @@ Thumbs.db
 # source -- ~52MB and not something a repo should carry. See
 # REPO_STRUCTURE.md's tooling section for what it's for / how to get it.
 cloudflared.exe
+tunnel.log
